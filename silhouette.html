@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Silhouette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Nunito:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+#game-canvas-wrap {
+	position: absolute;
+	left: 50%;
+	top: 62.5%;
+	transform: translate(-50%, -50%);
+	z-index: 1;
+	/* 其他樣式由 JS 控制 */
+}
+#game-canvas-wrap canvas{
+	opacity:0;
+	transform:translateY(0);
+	transition:opacity 1s cubic-bezier(0.4,0,0.2,1), transform 1s cubic-bezier(0.4,0,0.2,1);
+}
+body.mode-game #game-canvas-wrap canvas{
+	opacity:1;
+	transform:translateY(60px);
+	transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s, transform 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
+}
+:root {
+--bg:#f5f5f0;
+--text:#1a1a2e;
+--muted:#8888a0;
+--accent:#e94560;
+--border:#d8d8d0;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{overscroll-behavior:none;touch-action:pinch-zoom;}
+body{
+background:var(--bg);
+color:var(--text);
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+overflow:hidden;
+width:100vw;height:100vh;
+height:100dvh;
+user-select:none;
+-webkit-user-select:none;
+-webkit-tap-highlight-color:transparent;
+-webkit-touch-callout:none;
+}
+button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+#hud{
+position:absolute;top:0;left:0;right:0;
+display:grid;grid-template-columns:1fr auto 1fr;align-items:flex-start;
+padding:1.4rem 2rem;
+pointer-events:none;z-index:10;
+}
+#level-block{display:flex;flex-direction:column;gap:0.2rem;grid-column:2;justify-self:center;}
+#level-tag{font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--muted);}
+/* #hint removed – instructions moved to in-game help popup */
+#goal-wrap{
+position:absolute;top:3.5rem;left:50%;transform:translateX(-50%);
+z-index:10;
+display:flex;flex-direction:column;align-items:center;gap:0.35rem;
+pointer-events:none;
+}
+#goal-canvas{
+border:1px solid var(--border);background:#fff;
+pointer-events:auto;cursor:zoom-in;
+transform-origin:top center;
+transition:transform 0.25s cubic-bezier(0.4,0,0.2,1),box-shadow 0.25s;
+}
+#goal-canvas:hover,#goal-canvas.zoomed{
+transform:scale(1.6);
+box-shadow:0 4px 24px rgba(0,0,0,0.12);
+cursor:zoom-out;
+}
+#almost-hint{
+font-family:'JetBrains Mono','Inter',monospace;
+font-size:0.7rem;letter-spacing:0.16em;text-transform:uppercase;
+color:var(--accent);
+opacity:0;
+transition:opacity 0.3s;
+pointer-events:none;
+}
+#almost-hint.visible{opacity:1;}
+#debug-wrap{
+position:absolute;bottom:1.8rem;left:2rem;
+display:flex;flex-direction:column;align-items:flex-start;gap:0.45rem;
+z-index:10;
+padding:0.7rem;
+border:1px solid var(--border);
+background:rgba(255,255,255,0.92);
+backdrop-filter:blur(3px);
+}
+#debug-tag{font-size:0.65rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);}
+#debug-canvases{display:flex;gap:0.55rem;}
+.debug-block{display:flex;flex-direction:column;gap:0.25rem;}
+.debug-label{font-size:0.6rem;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;}
+.debug-canvas{border:1px solid var(--border);background:#fff;}
+#debug-stats{
+font-size:0.68rem;
+line-height:1.5;
+color:var(--text);
+white-space:pre-line;
+font-variant-numeric:tabular-nums;
+}
+.overlay{
+position:absolute;inset:0;
+display:flex;flex-direction:column;
+align-items:center;justify-content:center;gap:1.5rem;
+z-index:20;
+background:rgba(245,245,240,0.88);
+backdrop-filter:blur(5px);
+opacity:0;
+pointer-events:none;
+transition:opacity 0.45s cubic-bezier(0.4,0,0.2,1);
+}
+.overlay.visible {
+opacity:1;
+pointer-events:auto;
+}
+.overlay .btn {
+pointer-events:none;
+}
+.overlay.visible .btn {
+pointer-events:auto;
+}
+.overlay-title{font-size:2.4rem;letter-spacing:0.04em;font-family:'Nunito','Taipei Sans TC Beta',sans-serif;font-weight:700;}
+#level-tag,#debug-tag,.debug-label,.overlay-sub,#debug-stats{font-family:'JetBrains Mono','Inter',monospace;}
+.overlay-sub{font-size:0.82rem;color:var(--muted);letter-spacing:0.1em;}
+.btn{
+padding:0.55rem 2rem;
+border:1.5px solid var(--text);background:transparent;
+color:var(--text);
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:0.82rem;letter-spacing:0.12em;cursor:pointer;
+transition:background 0.18s,color 0.18s;
+pointer-events:all;
+}
+.btn:hover{background:var(--text);color:var(--bg);}
+#start-btn{
+border:none;background:transparent;
+padding:0;
+font-size:2.4rem;line-height:1;letter-spacing:0;
+display:inline-flex;align-items:center;justify-content:center;
+position:relative;
+}
+#start-btn::after{
+content:'\25B6';
+position:absolute;inset:0;
+display:flex;align-items:center;justify-content:center;
+color:var(--text);
+opacity:0;
+transition:opacity 0.25s;
+pointer-events:none;
+}
+#start-btn:hover::after{opacity:1;transition:opacity 0.25s;}
+#start-btn.clicked::after{opacity:1;transition:opacity 0s;}
+#start-btn{transition:opacity 0.5s,transform 0.5s cubic-bezier(0.4,0,0.2,1);}
+body:not(.mode-home) #start-btn{opacity:0;transform:scale(1.25);}
+
+/* ===== Screen UI (home / level select) ===== */
+#back-game,#back-levels{
+position:absolute;
+top:1.05rem;left:1.2rem;
+z-index:60;
+width:2rem;height:2rem;
+padding:0;
+font-size:1.1rem;
+display:flex;
+align-items:center;justify-content:center;
+opacity:0;
+pointer-events:none;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
+}
+#back-game[hidden],#back-levels[hidden]{display:flex;}
+body.mode-game #back-game{
+opacity:1;pointer-events:auto;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;
+}
+body.mode-levels #back-levels{
+opacity:1;pointer-events:auto;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 3s,background 0.18s,color 0.18s;
+}
+body.mode-game #hud{padding-left:2rem;}
+
+#screen-home,#screen-levels{
+position:absolute;
+inset:0;
+display:flex;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+gap:1.1rem;
+z-index:50;
+background:var(--bg);
+opacity:0;
+pointer-events:none;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
+}
+#screen-home.visible,#screen-levels.visible{
+opacity:1;
+pointer-events:auto;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 1.8s;
+}
+body.mode-game #screen-home,
+body.mode-game #screen-levels{
+opacity:0 !important;
+pointer-events:none !important;
+}
+body.mode-game #screen-levels{
+transition:opacity 0.5s cubic-bezier(0.4,0,0.2,1) !important;
+}
+body.mode-levels #screen-home{transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;}
+#screen-levels .overlay-title{opacity:0;transition:opacity 1s;}
+body.mode-levels #screen-levels .overlay-title{opacity:1;transition:opacity 1s 3s;}
+#screen-levels .page-arrow{opacity:0;}
+body.mode-levels #screen-levels .page-arrow{opacity:1;transition:opacity 1s 3s;}
+body.mode-levels #screen-levels .page-arrow:disabled{opacity:0.18;transition:opacity 1s 3s;}
+body.going-to-game #screen-levels .overlay-title,
+body.going-to-game #screen-levels .page-arrow,
+body.going-to-game #back-levels,
+body.going-to-game #level-grid .level-tile:not(.selected){
+opacity:0 !important;
+transition:opacity 0.5s !important;
+}
+body.mode-game #screen-levels .overlay-title,
+body.mode-game #screen-levels .page-arrow,
+body.mode-game #back-levels,
+body.mode-game #level-grid .level-tile:not(.selected){
+opacity:0 !important;
+transition:none !important;
+}
+body.going-to-game #level-grid .level-tile.selected{
+opacity:0 !important;
+transition:opacity 0.5s 0.75s !important;
+}
+body.mode-game #level-grid .level-tile.selected{
+opacity:0 !important;
+transition:none !important;
+}
+body.mode-game #screen-home *,
+body.mode-game #screen-levels *,
+body.mode-game #back-levels{
+pointer-events:none !important;
+}
+#hud,#goal-wrap,#debug-wrap{
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
+}
+body.mode-home #hud,body.mode-levels #hud,
+body.mode-home #goal-wrap,body.mode-levels #goal-wrap,
+body.mode-home #debug-wrap,body.mode-levels #debug-wrap{
+opacity:0;
+pointer-events:none;
+}
+body.mode-game #hud,body.mode-game #goal-wrap{
+opacity:1;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
+}
+
+#screen-home .overlay-sub,#screen-levels .overlay-sub{
+text-align:center;
+}
+#home-progress{
+font-size:0.75rem;
+letter-spacing:0.18em;
+color:var(--muted);
+font-variant-numeric:tabular-nums;
+}
+
+.levels-row{
+display:flex;
+align-items:center;
+gap:0.7rem;
+}
+.page-arrow{
+border:none;
+background:transparent;
+color:var(--text);
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:1.8rem;
+line-height:1;
+cursor:pointer;
+display:inline-flex;align-items:center;justify-content:center;
+padding:0;
+flex-shrink:0;
+position:relative;
+transition:opacity 1s;
+}
+.page-arrow::after{
+position:absolute;inset:0;
+display:flex;align-items:center;justify-content:center;
+color:var(--text);
+opacity:0;
+transition:opacity 0.25s;
+pointer-events:none;
+}
+.page-arrow:hover::after{opacity:1;transition:opacity 0.25s;}
+.page-arrow.clicked::after{transition:opacity 1s;}
+#prev-page::after{content:'\25C0';}
+#next-page::after{content:'\25B6';}
+.page-arrow:disabled{cursor:default;pointer-events:none;opacity:0.18;}
+.page-arrow:disabled:hover::after{opacity:0;}
+.level-grid-wrap{
+width:min(340px, 72vw);
+display:flex;
+flex-direction:column;
+gap:0.9rem;
+}
+#level-grid{
+position:relative;
+display:grid;
+grid-template-columns:repeat(5,1fr);
+gap:0;
+padding:2px;
+background:
+  radial-gradient(circle at 0 0, #c8c8c0 1.3px, transparent 1.8px),
+  radial-gradient(circle at 100% 0, #c8c8c0 1.3px, transparent 1.8px),
+  radial-gradient(circle at 0 100%, #c8c8c0 1.3px, transparent 1.8px),
+  radial-gradient(circle at 100% 100%, #c8c8c0 1.3px, transparent 1.8px);
+background-size:20% 25%;
+background-origin:content-box;
+background-clip:border-box;
+}
+body.mode-game #level-grid {
+pointer-events: none !important;
+}
+.level-tile{
+aspect-ratio:1/1;
+width:100%;
+position:relative;
+display:flex;
+align-items:center;
+justify-content:center;
+border:none;
+background:transparent;
+color:var(--text);
+opacity:0.35;
+cursor:pointer;
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:1rem;
+letter-spacing:0.08em;
+transition:background 0.18s,color 0.18s,opacity 0.18s,transform 0.55s cubic-bezier(0.4,0,0.2,1);
+border-radius:0;
+pointer-events:all;
+}
+.level-tile.completed{
+opacity:1;
+}
+body.page-swapping #level-grid,
+body.page-swapping #level-grid .level-tile,
+body.page-swapping .page-arrow,
+body.page-swap-cooldown #level-grid .level-tile{pointer-events:none !important;}
+.level-tile.entering-right,
+.level-tile.entering-left{animation:tile-enter-fade 0.35s cubic-bezier(0.4,0,0.2,1);pointer-events:none;}
+.level-tile.leaving-right,
+.level-tile.leaving-left{opacity:0;pointer-events:none;}
+@keyframes tile-enter-fade{from{opacity:0;}}
+.level-tile:hover,
+.level-tile.selected{
+color:var(--text);
+opacity:1;
+}
+#level-hover-rod{
+position:absolute;
+left:0;top:0;
+width:20%;height:25%;
+box-sizing:border-box;
+border:2.5px solid var(--text);
+pointer-events:none;
+opacity:0;
+transform:translate(0,0);
+transition:transform 0.18s cubic-bezier(0.4,0,0.2,1),opacity 0.18s;
+z-index:1;
+}
+#level-hover-rod.visible{opacity:1;}
+body.going-to-game #level-hover-rod{opacity:0 !important;transition:opacity 0.5s 0.75s !important;}
+body.going-to-game #level-grid{
+  opacity:0 !important;transition:opacity 0.5s 0.75s !important;
+  background-image:none !important;
+}
+body.mode-game #level-grid{opacity:0 !important;transition:none !important;}
+#level-grid{transition:opacity 0.25s;}
+body.mode-game #level-hover-rod{opacity:0 !important;transition:none !important;}
+.level-tile{z-index:2;}
+/* === Settings Button & Panel === */
+#settings-btn{
+position:absolute;
+bottom:1.4rem;right:1.8rem;
+width:2rem;height:2rem;
+border:1.5px solid var(--text);
+background:transparent;
+color:var(--text);
+font-size:1.15rem;
+cursor:pointer;
+display:flex;
+align-items:center;justify-content:center;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
+padding:0;
+opacity:0;
+pointer-events:none;
+}
+body.mode-home #settings-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
+#settings-btn:hover{background:var(--text);color:var(--bg);}
+#settings-panel{
+position:absolute;
+bottom:3.8rem;right:1.8rem;
+background:rgba(245,245,240,0.96);
+border:1px solid var(--border);
+backdrop-filter:blur(5px);
+padding:0.7rem 0.9rem;
+display:flex;
+flex-direction:column;
+gap:0.5rem;
+white-space:nowrap;
+opacity:0;visibility:hidden;pointer-events:none;
+transform:translateY(4px);
+transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
+           transform 0.22s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s linear 0.22s;
+}
+#settings-panel.visible{
+opacity:1;visibility:visible;pointer-events:auto;
+transform:translateY(0);
+transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
+           transform 0.22s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s;
+}
+body.mode-game #debug-wrap{display:none;}
+body.mode-game #debug-wrap.visible{display:flex;}
+/* === Game-mode left-rail buttons (reset / undo / reset-view) === */
+#reset-btn,#undo-btn,#reset-view-btn{
+position:absolute;
+left:1.2rem;
+width:2rem;height:2rem;
+border:1.5px solid var(--text);background:transparent;
+color:var(--text);
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:1.1rem;letter-spacing:0;cursor:pointer;
+display:flex;
+align-items:center;justify-content:center;
+z-index:30;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
+padding:0;
+opacity:0;
+pointer-events:none;
+}
+#reset-btn      {top:3.6rem;}
+#undo-btn       {top:6.0rem;font-size:1.05rem;}
+#reset-view-btn {top:8.4rem;font-size:1rem;}
+#reset-btn:hover,#undo-btn:hover,#reset-view-btn:hover{background:var(--text);color:var(--bg);}
+body.mode-game #undo-btn:disabled{opacity:0.35;cursor:default;}
+body.mode-game #undo-btn:disabled:hover{background:transparent;color:var(--text);}
+body.mode-game #reset-btn,
+body.mode-game #undo-btn,
+body.mode-game #reset-view-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
+/* === Help Button & Popup === */
+#help-btn{
+position:absolute;
+top:1.05rem;right:1.8rem;
+width:2rem;height:2rem;
+border:1.5px solid var(--text);
+background:transparent;
+color:var(--text);
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:1rem;letter-spacing:0;
+cursor:pointer;
+display:flex;
+align-items:center;justify-content:center;
+z-index:30;
+transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
+padding:0;
+opacity:0;
+pointer-events:none;
+}
+#help-btn:hover{background:var(--text);color:var(--bg);}
+body.mode-game #help-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
+#help-popup{
+position:absolute;
+top:3.4rem;right:1.8rem;
+background:rgba(245,245,240,0.96);
+border:1px solid var(--border);
+backdrop-filter:blur(5px);
+padding:0.85rem 1.1rem;
+font-size:0.76rem;
+line-height:1.85;
+color:var(--text);
+letter-spacing:0.03em;
+z-index:29;
+display:block;
+white-space:nowrap;
+opacity:0;visibility:hidden;pointer-events:none;
+transform:translateY(-4px);
+transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
+           transform 0.22s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s linear 0.22s;
+}
+#help-popup.visible{
+opacity:1;visibility:visible;pointer-events:auto;
+transform:translateY(0);
+transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
+           transform 0.22s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s;
+}
+body:not(.mode-game) #help-popup{
+opacity:0 !important;visibility:hidden !important;pointer-events:none !important;
+}
+/* === Settings panel rows === */
+.settings-row{width:100%;text-align:center;padding:0.42rem 0.85rem;font-size:0.78rem;letter-spacing:0.08em;}
+.audio-row{display:flex;justify-content:center;gap:1.4rem;padding:0.5rem 0.85rem;}
+/* Show vibration toggle only on touch-capable devices (phones/tablets). */
+.touch-only{display:none;}
+@media (pointer: coarse), (hover: none){.touch-only{display:flex;}}
+.lang-opt{opacity:0.38;}
+.lang-opt.lang-active{opacity:1;}
+.icon-btn{background:none;border:none;color:var(--text);cursor:pointer;padding:0.25rem;display:inline-flex;align-items:center;justify-content:center;opacity:0.78;transition:opacity 0.15s;}
+.icon-btn:hover{opacity:1;}
+.icon-btn svg{display:block;}
+/* === Confirm modal === */
+#confirm-modal,#credits-modal{
+position:absolute;inset:0;
+display:flex;align-items:center;justify-content:center;
+z-index:80;
+background:rgba(245,245,240,0.80);
+backdrop-filter:blur(4px);
+opacity:0;visibility:hidden;pointer-events:none;
+transition:opacity 0.3s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s linear 0.3s;
+}
+#confirm-modal.visible,#credits-modal.visible{
+opacity:1;visibility:visible;pointer-events:auto;
+transition:opacity 0.3s cubic-bezier(0.4,0,0.2,1),
+           visibility 0s;
+}
+#confirm-box,#credits-box{
+transform:scale(0.96);
+transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+#confirm-modal.visible #confirm-box,
+#credits-modal.visible #credits-box{
+transform:scale(1);
+}
+#confirm-box,#credits-box{
+background:var(--bg);
+border:1px solid var(--border);
+padding:1.7rem 2.2rem;
+display:flex;flex-direction:column;
+align-items:center;gap:0.9rem;
+min-width:260px;
+}
+#confirm-title,#credits-title{font-size:1.05rem;letter-spacing:0.06em;}
+#confirm-body{font-size:0.78rem;color:var(--muted);letter-spacing:0.04em;text-align:center;}
+#confirm-actions{display:flex;gap:0.8rem;margin-top:0.2rem;}
+.credits-line{font-size:0.82rem;letter-spacing:0.04em;color:var(--text);}
+.credits-muted{font-size:0.78rem;color:var(--muted);}
+#credits-footer{margin-top:0.4rem;}
+
+/* === Mobile / small-screen layout === */
+@media (max-width: 600px), (pointer: coarse) {
+  #hud{padding:1rem 1rem;}
+  .overlay-title{font-size:1.8rem;}
+  #back-game,#back-levels{top:0.7rem;left:0.7rem;}
+  #help-btn{top:0.7rem;right:0.9rem;}
+  #reset-btn{top:3rem;left:0.7rem;}
+  #undo-btn{top:5.6rem;left:0.7rem;}
+  #reset-view-btn{top:8.2rem;left:0.7rem;}
+  #settings-btn{bottom:1rem;right:0.9rem;}
+  #settings-panel{bottom:3.2rem;right:0.9rem;}
+  #help-popup{
+    top:3rem;right:0.9rem;
+    font-size:0.72rem;line-height:1.7;
+    padding:0.7rem 0.9rem;
+  }
+  #goal-wrap{top:2.8rem;}
+  #goal-canvas{width:120px;height:120px;}
+  #debug-wrap{bottom:1rem;left:0.7rem;padding:0.5rem;}
+  .level-grid-wrap{width:min(320px, 78vw);}
+  .levels-row{gap:0.3rem;}
+  .page-arrow{font-size:1.5rem;width:2rem;height:2rem;}
+  .level-tile{font-size:0.95rem;}
+  #start-btn{font-size:2.8rem;}
+  .btn{padding:0.6rem 1.6rem;}
+  /* Bigger tap targets for icon buttons */
+  #back-game,#back-levels,#reset-btn,#help-btn,#settings-btn{
+    width:2.4rem;height:2.4rem;font-size:1.1rem;
+  }
+}
+@media (max-height: 560px) {
+  #goal-wrap{top:2.6rem;}
+  #goal-canvas{width:108px;height:108px;}
+  #reset-btn{top:2.8rem;}
+}
+</style>
+</head>
+<body>
+<button class="btn" id="back-game">&lt;</button>
+<button class="btn" id="back-levels">&lt;</button>
+<button id="reset-btn" title="Reset level">&#8635;</button>
+<button id="undo-btn" title="Undo">&#8630;</button>
+<button id="reset-view-btn" title="Reset view"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.2"/><path d="M16.4 14.4l3 3M16.4 14.4l-1.2 1.2M16.4 14.4l1.2-1.2"/></svg></button>
+<button id="help-btn">?</button>
+<div id="help-popup">
+  1. Drag a line to move it<br>
+  2. Drag background to rotate view<br>
+  3. Pinch / scroll to zoom<br>
+  4. Find the right angle to clear<br>
+</div>
+
+<!-- Three.js 畫布包在這個容器 -->
+<div id="game-canvas-wrap"></div>
+
+<div id="screen-home" class="screen">
+<div class="overlay-title">Silhouette</div>
+<div id="home-progress" class="overlay-sub"></div>
+<button class="btn" id="start-btn">&#9655;</button>
+<button id="settings-btn">&#9881;</button>
+<div id="settings-panel">
+  <div class="audio-row" hidden>
+    <button class="icon-btn" id="music-btn" aria-label="Music"></button>
+    <button class="icon-btn" id="sfx-btn" aria-label="SFX"></button>
+  </div>
+  <div class="audio-row touch-only">
+    <button class="icon-btn" id="vibrate-btn" aria-label="Vibration"></button>
+  </div>
+  <button class="btn settings-row" id="lang-btn">中文</button>
+  <button class="btn settings-row" id="credits-btn">Credits</button>
+  <button class="btn settings-row" id="reset-progress-btn">Reset Progress</button>
+</div>
+</div>
+
+<div id="screen-levels" class="screen">
+<div class="overlay-title">Silhouette</div>
+<div class="levels-row">
+<button class="page-arrow" id="prev-page">&#9665;</button>
+<div class="level-grid-wrap">
+<div id="level-grid" aria-label="Level selection"><div id="level-hover-rod" aria-hidden="true"></div></div>
+</div>
+<button class="page-arrow" id="next-page">&#9655;</button>
+</div>
+</div>
+
+<div id="hud">
+<div id="level-block">
+<div id="level-tag"><span id="level-prefix">Level </span><span id="lvl-num">1</span><span id="level-suffix"></span></div>
+</div>
+</div>
+
+<div id="goal-wrap">
+<canvas id="goal-canvas" width="150" height="150"></canvas>
+<div id="almost-hint">Almost there!</div>
+</div>
+
+<div id="debug-wrap">
+<div id="debug-tag">Debug View</div>
+<div id="debug-canvases">
+<div class="debug-block">
+<div class="debug-label">Target Mask</div>
+<canvas id="debug-goal-canvas" class="debug-canvas" width="96" height="96"></canvas>
+</div>
+<div class="debug-block">
+<div class="debug-label">Current Projection</div>
+<canvas id="debug-rod-canvas" class="debug-canvas" width="96" height="96"></canvas>
+</div>
+</div>
+<div id="debug-stats">Waiting for level...</div>
+</div>
+
+<div class="overlay" id="clear-overlay">
+<div class="overlay-title">Level Clear</div>
+<button class="btn" id="next-btn">Next Level</button>
+</div>
+<div class="overlay" id="allclear-overlay">
+<div class="overlay-title">All Clear</div>
+<div class="overlay-sub">You've completed all levels.</div>
+<button class="btn" id="restart-btn">Play Again</button>
+</div>
+
+<!-- Confirm reset modal -->
+<div id="confirm-modal">
+  <div id="confirm-box">
+    <div id="confirm-title">Confirm Reset?</div>
+    <div id="confirm-body">All level progress will be cleared.</div>
+    <div id="confirm-actions">
+      <button class="btn" id="confirm-yes">Confirm</button>
+      <button class="btn" id="confirm-no">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Credits modal -->
+<div id="credits-modal">
+  <div id="credits-box">
+    <div id="credits-title">Credits</div>
+    <div class="credits-line" id="credits-design">Game Design: William Lu</div>
+    <div class="credits-line credits-muted" id="credits-music">Music: (TBA)</div>
+    <div id="credits-footer">
+      <button class="btn" id="credits-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var lang = 'en';
+  var musicMuted = false;
+  var sfxMuted   = false;
+  var HAPTIC_KEY = 'silhouette-haptics';
+  var hapticsOn  = (function(){
+    try { return localStorage.getItem(HAPTIC_KEY) !== 'off'; } catch(e) { return true; }
+  })();
+
+  var ICONS = {
+    noteOn:    '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>',
+    noteOff:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    speakerOn: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5v5h3.5L11 18V6L6.5 9.5H3z" fill="currentColor"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M17.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+    speakerOff:'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5v5h3.5L11 18V6L6.5 9.5H3z" fill="currentColor"/><path d="M15 9l6 6m0-6l-6 6" stroke-width="2"/></svg>',
+    // Phone outline with motion arcs on both sides — "vibration on".
+    vibrateOn: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="6" height="16" rx="1.2"/><line x1="12" y1="17.5" x2="12" y2="17.5" stroke-width="2.2"/><path d="M5.5 8.5c-1 1-1 5 0 7"/><path d="M3 7c-1.6 1.6-1.6 8 0 10"/><path d="M18.5 8.5c1 1 1 5 0 7"/><path d="M21 7c1.6 1.6 1.6 8 0 10"/></svg>',
+    vibrateOff:'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="6" height="16" rx="1.2"/><line x1="12" y1="17.5" x2="12" y2="17.5" stroke-width="2.2"/><line x1="3.5" y1="3.5" x2="20.5" y2="20.5" stroke-width="2.2"/></svg>'
+  };
+
+  var S = {
+    zh: {
+      start:        '&#9655;',
+      resetProgress:'重置進度',
+      langBtn:      '<span class="lang-opt">英</span>/<span class="lang-opt lang-active">中</span>',
+      credits:      '關於',
+      confirmTitle: '確認重置？',
+      confirmBody:  '所有關卡進度將被清除。',
+      confirmYes:   '確認',
+      confirmNo:    '取消',
+      creditsTitle: '關於',
+      creditsDesign:'遊戲設計：William Lu',
+      creditsMusic: '作曲：（待補上）',
+      creditsClose: '關閉',
+      levelClear:   'Level Clear',
+      allClear:     'All Clear',
+      allClearSub:  '已完成全部關卡。',
+      nextLevel:    '下一關',
+      playAgain:    '再玩一次',
+      levelPrefix:  '第 ',
+      levelSuffix:  ' 關',
+      helpHTML:     '1. 拖曳線條以移動<br>2. 拖曳背景以旋轉視角<br>3. 雙指 / 滾輪縮放<br>4. 找到正確角度以通關<br><span style="color:var(--muted)">&#8635; 重置關卡 &nbsp;&#183;&nbsp; &#9678; 重置視角 &nbsp;&#183;&nbsp; &#8630; 復原 &nbsp;&#183;&nbsp; ` 偵錯</span>',
+    },
+    en: {
+      start:        '&#9655;',
+      resetProgress:'Reset Progress',
+      langBtn:      '<span class="lang-opt lang-active">EN</span>/<span class="lang-opt">ZT</span>',
+      credits:      'Credits',
+      confirmTitle: 'Confirm Reset?',
+      confirmBody:  'All level progress will be cleared.',
+      confirmYes:   'Confirm',
+      confirmNo:    'Cancel',
+      creditsTitle: 'Credits',
+      creditsDesign:'Game Design: William Lu',
+      creditsMusic: 'Music: (TBA)',
+      creditsClose: 'Close',
+      levelClear:   'Level Clear',
+      allClear:     'All Clear',
+      allClearSub:  "You've completed all levels.",
+      nextLevel:    'Next Level',
+      playAgain:    'Play Again',
+      levelPrefix:  'Level ',
+      levelSuffix:  '',
+      helpHTML:     '1. Drag a line to move it<br>2. Drag background to rotate view<br>3. Pinch / scroll to zoom<br>4. Find the right angle to clear<br><span style="color:var(--muted)">&#8635; reset level &nbsp;&#183;&nbsp; &#9678; reset view &nbsp;&#183;&nbsp; &#8630; undo &nbsp;&#183;&nbsp; ` debug</span>',
+    }
+  };
+
+  function setText(id, html) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
+
+  function updateLang() {
+    var s = S[lang];
+    setText('start-btn',         s.start);
+    setText('reset-progress-btn',s.resetProgress);
+    setText('lang-btn',          s.langBtn);
+    setText('music-btn',         musicMuted ? ICONS.noteOff    : ICONS.noteOn);
+    setText('sfx-btn',           sfxMuted   ? ICONS.speakerOff : ICONS.speakerOn);
+    setText('vibrate-btn',       hapticsOn  ? ICONS.vibrateOn  : ICONS.vibrateOff);
+    setText('credits-btn',       s.credits);
+    setText('confirm-title',     s.confirmTitle);
+    setText('confirm-body',      s.confirmBody);
+    setText('confirm-yes',       s.confirmYes);
+    setText('confirm-no',        s.confirmNo);
+    setText('credits-title',     s.creditsTitle);
+    setText('credits-design',    s.creditsDesign);
+    setText('credits-music',     s.creditsMusic);
+    setText('credits-close',     s.creditsClose);
+    setText('next-btn',          s.nextLevel);
+    setText('restart-btn',       s.playAgain);
+    setText('level-prefix',      s.levelPrefix);
+    setText('level-suffix',      s.levelSuffix);
+    setText('help-popup',        s.helpHTML);
+    var ct = document.querySelector('#clear-overlay .overlay-title');
+    if (ct) ct.textContent = s.levelClear;
+    var at = document.querySelector('#allclear-overlay .overlay-title');
+    if (at) at.textContent = s.allClear;
+    var as = document.querySelector('#allclear-overlay .overlay-sub');
+    if (as) as.textContent = s.allClearSub;
+  }
+
+  // ── Arrow click-fade (1s post-click, 0.25s plain mouseleave) ──
+  ['start-btn','prev-page','next-page'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(!el) return;
+    var clearTimer = null;
+    el.addEventListener('click', function(){ el.classList.add('clicked'); });
+    el.addEventListener('mouseenter', function(){
+      if(clearTimer){ clearTimeout(clearTimer); clearTimer = null; }
+    });
+    el.addEventListener('mouseleave', function(){
+      if(el.classList.contains('clicked')){
+        clearTimer = setTimeout(function(){
+          el.classList.remove('clicked');
+          clearTimer = null;
+        }, 1000);
+      }
+    });
+  });
+
+  // ── Goal canvas tap-zoom (touch devices have no hover) ──
+  var goalCanvas = document.getElementById('goal-canvas');
+  if (goalCanvas) {
+    goalCanvas.addEventListener('click', function(e){
+      e.stopPropagation();
+      goalCanvas.classList.toggle('zoomed');
+    });
+  }
+  document.addEventListener('click', function(){
+    if (goalCanvas) goalCanvas.classList.remove('zoomed');
+  });
+
+  // ── Help popup ──
+  var helpBtn   = document.getElementById('help-btn');
+  var helpPopup = document.getElementById('help-popup');
+  helpBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    helpPopup.classList.toggle('visible');
+  });
+
+  // ── Settings panel ──
+  var settingsBtn   = document.getElementById('settings-btn');
+  var settingsPanel = document.getElementById('settings-panel');
+  settingsBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    settingsPanel.classList.toggle('visible');
+  });
+
+  // Close floating panels on outside click
+  document.addEventListener('click', function() {
+    helpPopup.classList.remove('visible');
+    settingsPanel.classList.remove('visible');
+  });
+
+  // ── Reset progress → confirm modal ──
+  var confirmModal = document.getElementById('confirm-modal');
+  document.getElementById('reset-progress-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    settingsPanel.classList.remove('visible');
+    confirmModal.classList.add('visible');
+  });
+  document.getElementById('confirm-yes').addEventListener('click', function(e) {
+    e.stopPropagation();
+    confirmModal.classList.remove('visible');
+    document.dispatchEvent(new CustomEvent('silhouette:resetprogress'));
+  });
+  document.getElementById('confirm-no').addEventListener('click', function(e) {
+    e.stopPropagation();
+    confirmModal.classList.remove('visible');
+  });
+  document.getElementById('confirm-box').addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
+
+  // ── Language toggle ──
+  document.getElementById('lang-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    lang = (lang === 'zh') ? 'en' : 'zh';
+    updateLang();
+  });
+
+  // ── Music mute (no-op) ──
+  document.getElementById('music-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    musicMuted = !musicMuted;
+    setText('music-btn', musicMuted ? ICONS.noteOff : ICONS.noteOn);
+  });
+
+  // ── SFX mute (no-op) ──
+  document.getElementById('sfx-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    sfxMuted = !sfxMuted;
+    setText('sfx-btn', sfxMuted ? ICONS.speakerOff : ICONS.speakerOn);
+  });
+
+  // ── Haptics toggle (read by pulseSnap in threeGame.js via localStorage) ──
+  window.silhouetteHapticsEnabled = function(){ return hapticsOn; };
+  document.getElementById('vibrate-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    hapticsOn = !hapticsOn;
+    try { localStorage.setItem(HAPTIC_KEY, hapticsOn ? 'on' : 'off'); } catch(_){}
+    setText('vibrate-btn', hapticsOn ? ICONS.vibrateOn : ICONS.vibrateOff);
+    // Tiny preview pulse so the user feels what they just turned on.
+    if (hapticsOn && navigator.vibrate) { try { navigator.vibrate(12); } catch(_){} }
+  });
+
+  // ── Credits modal ──
+  var creditsModal = document.getElementById('credits-modal');
+  document.getElementById('credits-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    settingsPanel.classList.remove('visible');
+    creditsModal.classList.add('visible');
+  });
+  document.getElementById('credits-close').addEventListener('click', function(e) {
+    e.stopPropagation();
+    creditsModal.classList.remove('visible');
+  });
+  document.getElementById('credits-box').addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
+
+  updateLang();
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.4/dist/gsap.min.js"></script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
