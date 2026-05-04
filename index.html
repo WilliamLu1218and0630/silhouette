@@ -55,10 +55,17 @@ position:fixed;inset:0;
 background:var(--bg);
 display:flex;align-items:center;justify-content:center;
 z-index:9999;
-font-size:0.7rem;letter-spacing:0.2em;color:var(--muted);
-text-transform:uppercase;
 transition:opacity 0.35s cubic-bezier(0.4,0,0.2,1);
 }
+#app-loader::before{
+content:'';
+width:28px;height:28px;
+border:2px solid var(--border);
+border-top-color:var(--text);
+border-radius:50%;
+animation:app-spin 0.8s linear infinite;
+}
+@keyframes app-spin{to{transform:rotate(360deg);}}
 body:not(.loading) #app-loader{
 opacity:0;
 pointer-events:none;
@@ -261,6 +268,8 @@ body.mode-game #back-levels{
 pointer-events:none !important;
 }
 #hud,#goal-wrap,#debug-wrap{
+opacity:0;
+pointer-events:none;
 transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
 }
 body.mode-home #hud,body.mode-levels #hud,
@@ -609,7 +618,7 @@ min-width:260px;
 </style>
 </head>
 <body class="loading">
-<div id="app-loader">Loading…</div>
+<div id="app-loader" aria-label="Loading"></div>
 <button class="btn" id="back-game">&lt;</button>
 <button class="btn" id="back-levels">&lt;</button>
 <button id="reset-btn" title="Reset level">&#8635;</button>
@@ -940,11 +949,16 @@ min-width:260px;
 
   updateLang();
 
-  // ── Reveal UI once main.js has booted (i.e. body got a mode-* class) ──
+  // ── Reveal UI once main.js has booted (body got a mode-* class) ──
+  // We wait two extra frames so the screen-home/levels overlay can paint
+  // its own background before the cloak comes off — otherwise the HUD/debug
+  // panels can flash through underneath.
   function reveal() {
     if (!document.body.classList.contains('loading')) return;
     requestAnimationFrame(function () {
-      document.body.classList.remove('loading');
+      requestAnimationFrame(function () {
+        document.body.classList.remove('loading');
+      });
     });
   }
   if (/\bmode-(home|levels|game)\b/.test(document.body.className)) {
@@ -958,7 +972,7 @@ min-width:260px;
     });
     mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // Safety fallback so the page never stays cloaked if main.js fails.
-    setTimeout(function () { mo.disconnect(); reveal(); }, 2500);
+    setTimeout(function () { mo.disconnect(); reveal(); }, 6000);
   }
 })();
 </script>
