@@ -10,7 +10,7 @@
 <meta property="og:title" content="Silhouette">
 <meta property="og:description" content="A minimalist 3D puzzle. Rotate the rods so their projection matches the goal silhouette.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="preview.png">
+<meta property="og:image" content="https://williamlu1218and0630.github.io/silhouette/preview.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Silhouette title screen">
@@ -19,7 +19,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Silhouette">
 <meta name="twitter:description" content="A minimalist 3D puzzle. Rotate the rods so their projection matches the goal silhouette.">
-<meta name="twitter:image" content="preview.png">
+<meta name="twitter:image" content="https://williamlu1218and0630.github.io/silhouette/preview.png">
 
 <!-- Favicon (uses the same image; replace with a dedicated icon if you have one) -->
 <link rel="icon" type="image/png" href="preview.png">
@@ -110,6 +110,11 @@ border:1px solid var(--border);background:#fff;
 pointer-events:auto;cursor:zoom-in;
 transform-origin:top center;
 transition:transform 0.25s cubic-bezier(0.4,0,0.2,1),box-shadow 0.25s;
+/* Hint the browser to use high-quality resampling when CSS scales the canvas */
+image-rendering:auto;
+image-rendering:high-quality;
+-webkit-backface-visibility:hidden;
+backface-visibility:hidden;
 }
 #goal-canvas:hover,#goal-canvas.zoomed{
 transform:scale(1.6);
