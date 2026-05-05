@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(git -C /f/silhouette diff level-editor.html)"
-    ]
-  }
-}
