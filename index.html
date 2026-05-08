@@ -1027,7 +1027,7 @@ pointer-events:none !important;
       if (cur === lastMode) return;
       var prev = lastMode;
       lastMode = cur;
-      if (prev !== null && cur !== null) lockFor(transitionDurationFor(cur));
+      if (cur !== null) lockFor(transitionDurationFor(cur));
     });
     modeMo.observe(document.body, { attributes:true, attributeFilter:['class'] });
   })();

@@ -47,6 +47,17 @@ export function initGame() {
   const GEO_MIN_COVERAGE  = 0.97;  // bidirectional coverage required (rod↔goal)
   const GEO_JUNCTION_EPS  = 0.18;  // corner-snap tolerance, world units (~0.36 cell)
 
+  // ── View assist (post-clear) ────────────────────────────────────────────────
+  // Once victory is confirmed, climb the match-score landscape (goalCoverage +
+  // rodCoverage) by gradient ascent over (theta, phi) within a small window,
+  // then glide the camera to that local optimum. No assumption that the
+  // optimum is the hardcoded default angle — different levels may peak at
+  // top-down/front/side/oblique, and the player's solve may sit a degree or
+  // two off the designed pose.
+  const VIEW_ASSIST_RANGE_RAD = 6 * Math.PI / 180;   // gradient-search radius per axis
+  const VIEW_ASSIST_MIN_MOVE  = 0.002;               // skip glide if target ≈ current (rad)
+  const VIEW_ASSIST_PROBE_RAD = 0.6 * Math.PI / 180; // finite-difference probe per axis
+
   // ── Interaction ─────────────────────────────────────────────────────────────
   // Pointer travel (px) needed to commit a drag. Touch input is noisier than
   // mouse, so coarse pointers get a larger threshold to avoid accidental rod-grabs
@@ -265,6 +276,11 @@ export function initGame() {
     }
   }
 
+  let viewAssistTween = null;
+  function killViewAssist() {
+    if (viewAssistTween) { viewAssistTween.kill(); viewAssistTween = null; }
+  }
+
   function clearScene() {
     sceneObjects.forEach(o => scene.remove(o));
     sceneObjects = [];
@@ -273,6 +289,7 @@ export function initGame() {
     victoryImmune = false;
     goalShape = null;
     lastProjectionStats = null;
+    killViewAssist();
     if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
   }
 
@@ -540,10 +557,9 @@ export function initGame() {
 
     const goalCoverage = goalSamples > 0 ? goalCovered / goalSamples : 0;
     const rodCoverage  = rodSamples  > 0 ? rodCovered  / rodSamples  : 0;
-    const junctionsOK  = junctionsHit === junctions.length;
 
     return {
-      matched: goalCoverage >= GEO_MIN_COVERAGE && rodCoverage >= GEO_MIN_COVERAGE && junctionsOK,
+      matched: goalCoverage >= GEO_MIN_COVERAGE && rodCoverage >= GEO_MIN_COVERAGE,
       goalCoverage, rodCoverage,
       junctionsHit, junctionsTotal: junctions.length,
     };
@@ -669,6 +685,112 @@ export function initGame() {
     return centerShape(segments, endpoints);
   }
 
+  // Like buildProjectedRodShape, but uses a hypothetical (theta, phi) rather
+  // than the live camera. Mirrors setCameraOrbit + normalizeCameraOrientation
+  // + projectToView so the score is identical to the live measurement when
+  // (theta, phi) === (camTheta, camPhi). Used by the gradient-ascent search.
+  function buildProjectedRodShapeAt(theta, phi) {
+    const st = Math.sin(theta), ct = Math.cos(theta);
+    const sp = Math.sin(phi),   cp = Math.cos(phi);
+    const upx = -sp * st, upy = cp, upz = -sp * ct;
+    const vx  = -cp * st, vy = -sp, vz = -cp * ct;
+    // right = view × up
+    const rx = vy * upz - vz * upy;
+    const ry = vz * upx - vx * upz;
+    const rz = vx * upy - vy * upx;
+    const segments = [], endpoints = [];
+    for (const rod of rods) {
+      const projected = rod.path.map(n => {
+        const w = nodeToWorld(n);
+        const px =  w.x * rx  + w.y * ry  + w.z * rz;
+        const py = -(w.x * upx + w.y * upy + w.z * upz);
+        return [px, py];
+      });
+      for (let i = 0; i < projected.length - 1; i++) {
+        segments.push([projected[i], projected[i + 1]]);
+      }
+      for (const p of projected) endpoints.push(p);
+    }
+    return centerShape(segments, endpoints);
+  }
+
+  // Mean bidirectional sample distance between rod-projection and goal shapes.
+  // Lower is a better fit, with 0 = perfect alignment. Used as the optimisation
+  // objective for the post-clear camera glide because it stays smooth across
+  // the matched region — the coverage metric saturates at 1.0 inside that
+  // region and gives a zero gradient, leaving nothing for hill-climbing to
+  // climb. Distance keeps decreasing right up to the exact pose.
+  function meanBidirectionalDistance(rodShape, goalShape) {
+    if (!rodShape || !goalShape) return Infinity;
+    const rodSegs = rodShape.segments, goalSegs = goalShape.segments;
+    if (!rodSegs.length || !goalSegs.length) return Infinity;
+    let total = 0, count = 0;
+    for (const [s, e] of goalSegs) {
+      for (const [px, py] of sampleSegment(s, e, GEO_SAMPLE_STEP)) {
+        total += distPointToShape(px, py, rodSegs);
+        count++;
+      }
+    }
+    for (const [s, e] of rodSegs) {
+      for (const [px, py] of sampleSegment(s, e, GEO_SAMPLE_STEP)) {
+        total += distPointToShape(px, py, goalSegs);
+        count++;
+      }
+    }
+    return count > 0 ? total / count : Infinity;
+  }
+
+  // Scalar score at a candidate camera angle: -mean-distance, so "higher is
+  // better" semantics work for hill-climbing. Returns -Infinity when there's
+  // nothing to project against.
+  function scoreViewAt(theta, phi) {
+    if (!goalShape || !rods.length) return -Infinity;
+    const shape = buildProjectedRodShapeAt(theta, phi);
+    return -meanBidirectionalDistance(shape, goalShape);
+  }
+
+  // Hill-climb on score over (theta, phi) starting from (theta0, phi0), capped
+  // to a square window of radius `range`. Backtracks the step on miss; bails on
+  // a vanishing gradient or when the step shrinks below the probe size. Returns
+  // the best (theta, phi) found and whether it improved over the start.
+  function findBestViewNear(theta0, phi0, range) {
+    const eps = VIEW_ASSIST_PROBE_RAD;
+    const minStep = eps;
+    let theta = theta0, phi = phi0;
+    let best = scoreViewAt(theta, phi);
+    const initialBest = best;
+    let step = 1.5 * Math.PI / 180;
+    for (let iter = 0; iter < 24; iter++) {
+      const sTp = scoreViewAt(theta + eps, phi);
+      const sTm = scoreViewAt(theta - eps, phi);
+      const sPp = scoreViewAt(theta, phi + eps);
+      const sPm = scoreViewAt(theta, phi - eps);
+      let gT = (sTp - sTm) / (2 * eps);
+      let gP = (sPp - sPm) / (2 * eps);
+      const gMag = Math.hypot(gT, gP);
+      if (gMag < 1e-4) break;
+      gT /= gMag; gP /= gMag;
+      let advanced = false;
+      while (step >= minStep) {
+        const nt = theta + gT * step;
+        const np = phi   + gP * step;
+        if (Math.abs(nt - theta0) > range || Math.abs(np - phi0) > range) {
+          step *= 0.5;
+          continue;
+        }
+        const s = scoreViewAt(nt, np);
+        if (s > best + 1e-4) {
+          theta = nt; phi = np; best = s;
+          advanced = true;
+          break;
+        }
+        step *= 0.5;
+      }
+      if (!advanced) break;
+    }
+    return { theta, phi, score: best, improved: best > initialBest + 1e-4 };
+  }
+
   function buildGoalShapeData() {
     if (!goalSegments.length) return null;
     const segments = goalSegments.map(s => [
@@ -734,6 +856,32 @@ export function initGame() {
     if (projectionGeometricMatches()) { cleared = true; triggerClear(); }
   }
 
+  // On-clear camera glide. After victory is confirmed, hill-climb the
+  // bidirectional-coverage score over (theta, phi) within a small window and
+  // tween the camera to that local peak — so the cleared shape lands at this
+  // level's designed pose (top-down/front/side/oblique — not assumed default).
+  // Tracked through viewAssistTween so clearScene/level-reload kills it.
+  function glideCameraToBestView(duration = 0.5) {
+    killViewAssist();
+    if (!goalShape || !rods.length) return;
+    const { theta: tt, phi: tp } = findBestViewNear(camTheta, camPhi, VIEW_ASSIST_RANGE_RAD);
+    if (Math.abs(tt - camTheta) < VIEW_ASSIST_MIN_MOVE &&
+        Math.abs(tp - camPhi)   < VIEW_ASSIST_MIN_MOVE) return;
+    const fromTheta = camTheta, fromPhi = camPhi;
+    const dTheta = tt - fromTheta, dPhi = tp - fromPhi;
+    const obj = { t: 0 };
+    viewAssistTween = gsap.to(obj, {
+      t: 1, duration, ease: 'power2.out',
+      onUpdate: () => {
+        camTheta = fromTheta + dTheta * obj.t;
+        camPhi   = fromPhi   + dPhi   * obj.t;
+        setCameraOrbit(camTheta, camPhi);
+        updateCamera();
+      },
+      onComplete: () => { viewAssistTween = null; },
+    });
+  }
+
   function showOverlay(id) {
     document.getElementById(id).classList.add('visible');
     renderer.domElement.style.pointerEvents = 'none';
@@ -750,6 +898,16 @@ export function initGame() {
   function triggerClear() {
     completedLevels.add(currentLevel);
     saveProgress();
+    // Lock all input for the entire clear sequence (camera glide → gold pulse
+    // → fade → overlay). Without this the player can still grab a rod or
+    // rotate the camera during the ~2s before clear-overlay's showOverlay
+    // takes pointer events away. Cancels any in-flight drag too.
+    resetDragState();
+    renderer.domElement.style.pointerEvents = 'none';
+    // Glide camera to the local match-score peak inside a small window, so
+    // the cleared shape lands at this level's designed pose regardless of how
+    // many degrees off the player solved at.
+    glideCameraToBestView(0.55);
     rods.forEach((r) => {
       r.cleared = true;
       r.allMeshes.forEach(m => {
@@ -865,8 +1023,9 @@ export function initGame() {
   const dragAnchor    = new THREE.Vector3(); // pointer's plane projection at drag start
   const dragRodAnchor = new THREE.Vector3(); // rod path[0] world position at drag start
   const dragOffset    = new THREE.Vector3(); // current world-space offset on the drag plane
-  // Legal cell-space offset bounds for the active rod (x/z only; y is unconstrained).
-  let dragMinDgx = 0, dragMaxDgx = 0, dragMinDgz = 0, dragMaxDgz = 0;
+  // Legal cell-space offset bounds for the active rod. Y has only a floor
+  // (rods can't go below the ground plane); ceiling stays unbounded.
+  let dragMinDgx = 0, dragMaxDgx = 0, dragMinDgy = 0, dragMinDgz = 0, dragMaxDgz = 0;
 
   function resetDragState() {
     dragMode     = null;
@@ -893,14 +1052,16 @@ export function initGame() {
     if      (dragPlaneIdx === 0) dgx = 0;
     else if (dragPlaneIdx === 1) dgy = 0;
     else if (dragPlaneIdx === 2) dgz = 0;
-    let minDgx = -Infinity, maxDgx = Infinity, minDgz = -Infinity, maxDgz = Infinity;
-    for (const [gx, , gz] of dragRod.path) {
+    let minDgx = -Infinity, maxDgx = Infinity, minDgy = -Infinity, minDgz = -Infinity, maxDgz = Infinity;
+    for (const [gx, gy, gz] of dragRod.path) {
       minDgx = Math.max(minDgx, -gx);
       maxDgx = Math.min(maxDgx, gridSize - 1 - gx);
+      minDgy = Math.max(minDgy, -gy);
       minDgz = Math.max(minDgz, -gz);
       maxDgz = Math.min(maxDgz, gridSize - 1 - gz);
     }
     dgx = clamp(dgx, minDgx, maxDgx);
+    dgy = Math.max(dgy, minDgy);
     dgz = clamp(dgz, minDgz, maxDgz);
     if (dgx !== 0 || dgy !== 0 || dgz !== 0) {
       if (pendingPreDragSnap) pushUndoSnapshot(pendingPreDragSnap);
@@ -1040,6 +1201,8 @@ export function initGame() {
     };
     const start = levelPage * 20;
     const end   = Math.min(start + 20, LEVELS.length);
+    const rowsThisPage = Math.max(1, Math.ceil((end - start) / 5));
+    grid.style.backgroundSize = `20% ${100 / rowsThisPage}%`;
     for (let idx = start; idx < end; idx++) {
       const tile = document.createElement('button');
       tile.className     = 'level-tile' + (completedLevels.has(idx) ? ' completed' : '');
@@ -1238,6 +1401,7 @@ export function initGame() {
 
   let pendingPreDragSnap = null;
   function onDown(cx, cy) {
+    killViewAssist();
     pointerStart = { x: cx, y: cy };
     lastPointer  = { x: cx, y: cy };
     hasMoved     = false;
@@ -1270,12 +1434,15 @@ export function initGame() {
         dragPlane.setFromNormalAndCoplanarPoint(bestOpt.normal, p0);
         dragRodAnchor.copy(p0);
         dragOffset.set(0, 0, 0);
-        // Cache the legal cell-space offset range so no node leaves the x/z grid.
+        // Cache the legal cell-space offset range so no node leaves the grid
+        // horizontally or drops below the ground plane.
         dragMinDgx = -Infinity; dragMaxDgx = Infinity;
+        dragMinDgy = -Infinity;
         dragMinDgz = -Infinity; dragMaxDgz = Infinity;
-        for (const [gx, , gz] of dragRod.path) {
+        for (const [gx, gy, gz] of dragRod.path) {
           dragMinDgx = Math.max(dragMinDgx, -gx);
           dragMaxDgx = Math.min(dragMaxDgx, gridSize - 1 - gx);
+          dragMinDgy = Math.max(dragMinDgy, -gy);
           dragMinDgz = Math.max(dragMinDgz, -gz);
           dragMaxDgz = Math.min(dragMaxDgz, gridSize - 1 - gz);
         }
@@ -1383,14 +1550,15 @@ export function initGame() {
         else if (dragPlaneIdx === 1) dragOffset.y = 0;
         else if (dragPlaneIdx === 2) dragOffset.z = 0;
         // x/z get an elastic clamp so the rod rubber-bands a little past the grid
-        // edge (signals "you've hit the wall" without feeling stuck); y is free.
+        // edge (signals "you've hit the wall" without feeling stuck); y has the
+        // same elastic feel against its floor (y=0) and is unbounded above.
         const ex = elasticClampCells(dragOffset.x / CELL, dragMinDgx, dragMaxDgx);
+        const ey = elasticClampCells(dragOffset.y / CELL, dragMinDgy, Infinity);
         const ez = elasticClampCells(dragOffset.z / CELL, dragMinDgz, dragMaxDgz);
-        const rawDy = dragOffset.y / CELL;
         // Inside the grid the magnetic snap takes over; outside, skip magnetise so
         // the visual position keeps following the elastic curve smoothly.
         const visX = (dragPlaneIdx === 0) ? 0 : (ex.inside ? magnetize(ex.value) : ex.value) * CELL;
-        const visY = (dragPlaneIdx === 1) ? 0 : magnetize(rawDy) * CELL;
+        const visY = (dragPlaneIdx === 1) ? 0 : (ey.inside ? magnetize(ey.value) : ey.value) * CELL;
         const visZ = (dragPlaneIdx === 2) ? 0 : (ez.inside ? magnetize(ez.value) : ez.value) * CELL;
         setRodVisualOffset(dragRod, visX, visY, visZ);
 
@@ -1398,9 +1566,13 @@ export function initGame() {
         // the legal x/z bounds — small accidental overshoots stay silent so the
         // user doesn't get a red flash from grazing the edge.
         const rawDx = dragOffset.x / CELL;
+        const rawDy = dragOffset.y / CELL;
         const rawDz = dragOffset.z / CELL;
         const overshootX = (dragPlaneIdx !== 0)
           ? Math.max(0, rawDx - dragMaxDgx, dragMinDgx - rawDx)
+          : 0;
+        const overshootY = (dragPlaneIdx !== 1)
+          ? Math.max(0, dragMinDgy - rawDy)
           : 0;
         const overshootZ = (dragPlaneIdx !== 2)
           ? Math.max(0, rawDz - dragMaxDgz, dragMinDgz - rawDz)
@@ -1408,15 +1580,15 @@ export function initGame() {
         // Drag past CANCEL pad → auto-release the rod. Snaps back to its pre-drag
         // position; the player has to grab it again. Cheaper than letting the
         // rubber-band stretch indefinitely and clearer than no feedback.
-        if (overshootX > OOB_CANCEL_PAD || overshootZ > OOB_CANCEL_PAD) {
+        if (overshootX > OOB_CANCEL_PAD || overshootY > OOB_CANCEL_PAD || overshootZ > OOB_CANCEL_PAD) {
           cancelDrag();
           return;
         }
 
         // Haptic pulse when the rod magnetises onto a new integer cell.
-        const sx = Math.round(ex.value), sy = Math.round(rawDy), sz = Math.round(ez.value);
+        const sx = Math.round(ex.value), sy = Math.round(ey.value), sz = Math.round(ez.value);
         const inSnapX = (dragPlaneIdx === 0) || Math.abs(ex.value - sx) <= SNAP_BUFFER;
-        const inSnapY = (dragPlaneIdx === 1) || Math.abs(rawDy   - sy) <= SNAP_BUFFER;
+        const inSnapY = (dragPlaneIdx === 1) || Math.abs(ey.value - sy) <= SNAP_BUFFER;
         const inSnapZ = (dragPlaneIdx === 2) || Math.abs(ez.value - sz) <= SNAP_BUFFER;
         if (inSnapX && inSnapY && inSnapZ) {
           const key = `${sx},${sy},${sz}`;
@@ -1539,6 +1711,7 @@ export function initGame() {
   // keeps the button safe if level data is reloaded).
   function softResetLevel() {
     const RESET_DURATION_S = 0.5;
+    killViewAssist();
     if (!activeScramble || activeScramble.idx !== currentLevel || !rods.length) {
       loadLevel(currentLevel, { preserveSeed: true });
       return;
@@ -1596,9 +1769,13 @@ export function initGame() {
     });
   }
 
-  document.getElementById('reset-btn').addEventListener('click', softResetLevel);
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    if (cleared) return;
+    softResetLevel();
+  });
 
   document.getElementById('undo-btn').addEventListener('click', () => {
+    if (cleared) return;
     if (!undoStack.length) return;
     const snap = undoStack.pop();
     updateUndoBtn();
@@ -1608,6 +1785,8 @@ export function initGame() {
   });
 
   document.getElementById('reset-view-btn').addEventListener('click', () => {
+    if (cleared) return;
+    killViewAssist();
     resetDragState();
     const fromTheta = camTheta, fromPhi = camPhi, fromZoom = camZoomFactor;
     const targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, CAM_ZOOM_LOAD * (5 / Math.max(gridSize, 1))));
