@@ -1,4 +1,4 @@
-export function drawGoalPreview(canvas, paths) {
+export function drawGoalPreview(canvas, paths, opts = {}) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
@@ -31,8 +31,10 @@ export function drawGoalPreview(canvas, paths) {
   ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
 
   ctx.clearRect(0, 0, S, S);
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, S, S);
+  if (!opts.transparent) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, S, S);
+  }
   if (!paths || paths.length === 0) return;
 
   // Collect unique nodes across all paths to compute the bounding box

@@ -17,6 +17,7 @@ export function initGame() {
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   const CAM_SIZE          = 5;                           // orthographic frustum half-size
+  const CAM_VSHIFT        = 1.40;                        // shift frustum up so grid sits lower on screen
   const CAM_DIST          = 16;                          // orbit radius from origin
   const CAM_ZOOM_INIT     = 2.0;                         // zoom level at startup
   const CAM_ZOOM_LOAD     = 1.5;                         // zoom reset on every level load
@@ -42,10 +43,17 @@ export function initGame() {
   // Compares projected rod segments to goal segments directly, in world units,
   // after translating each shape's bbox-center to the origin (no rescale: scale
   // matches naturally because goal coords get multiplied by CELL).
-  const GEO_EPSILON       = 0.12;  // matching tolerance, world units (~0.24 grid cell)
-  const GEO_SAMPLE_STEP   = 0.05;  // segment sampling step ≤ ε/2
-  const GEO_MIN_COVERAGE  = 0.97;  // bidirectional coverage required (rod↔goal)
-  const GEO_JUNCTION_EPS  = 0.18;  // corner-snap tolerance, world units (~0.36 cell)
+  const GEO_EPSILON              = 0.12;  // matching tolerance, world units (~0.24 grid cell)
+  const GEO_SAMPLE_STEP          = 0.05;  // segment sampling step ≤ ε/2
+  // Per-segment coverage instead of a global average: a single misplaced segment
+  // can no longer be hidden by the others' near-perfect coverage. A complex goal
+  // with one wrong stroke would previously still average ≥ 0.97.
+  const GEO_MIN_SEGMENT_COVERAGE = 0.95;  // every goal/rod segment must reach this individually
+  // Floor on samples per segment so the 0.95 ratio threshold has the same effective
+  // granularity for short and long segments. Without this, a 1-cell segment at step
+  // 0.05 only has 11 samples (1 miss = 0.91 cov, fails), while a 4-cell segment has
+  // 41 (2 misses = 0.95, passes) — different effective stringency by length.
+  const GEO_MIN_SAMPLES_PER_SEG  = 21;
 
   // ── View assist (post-clear) ────────────────────────────────────────────────
   // Once victory is confirmed, climb the match-score landscape (goalCoverage +
@@ -119,10 +127,11 @@ export function initGame() {
   let camZoomFactor = CAM_ZOOM_INIT;
 
   function applyZoom() {
+    const vshift = CAM_VSHIFT / camZoomFactor;
     camera.left   = -CAM_SIZE * camAspect / camZoomFactor;
     camera.right  =  CAM_SIZE * camAspect / camZoomFactor;
-    camera.top    =  CAM_SIZE / camZoomFactor;
-    camera.bottom = -CAM_SIZE / camZoomFactor;
+    camera.top    =  CAM_SIZE / camZoomFactor + vshift;
+    camera.bottom = -CAM_SIZE / camZoomFactor + vshift;
     camera.updateProjectionMatrix();
   }
 
@@ -291,6 +300,8 @@ export function initGame() {
     lastProjectionStats = null;
     killViewAssist();
     if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+    _pendingEntrance = null;
+    _gridEntranceMat = null;
   }
 
   function addToScene(obj) {
@@ -299,9 +310,11 @@ export function initGame() {
     return obj;
   }
 
+  const GRID_ENTRANCE_DURATION = 1.2;
+  let _gridEntranceMat = null;
   function buildGridDots() {
     const geo = new THREE.SphereGeometry(0.015, 6, 6);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xc8c8c0 });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xc8c8c0, transparent: true, opacity: 0 });
     for (let x = 0; x < gridSize; x++) {
       for (let z = 0; z < gridSize; z++) {
         const m = new THREE.Mesh(geo, mat);
@@ -310,6 +323,7 @@ export function initGame() {
         addToScene(m);
       }
     }
+    _gridEntranceMat = mat;
   }
 
   function buildSegmentsFromPaths(paths) {
@@ -423,6 +437,75 @@ export function initGame() {
     };
   }
 
+  let _pendingEntrance = null;
+
+  const ROD_ENTRANCE_DROP = 0.6; // world units — how far above each rod starts
+  function primeRodsEntrance(rodList) {
+    rodList.forEach(rod => {
+      const meshes = [...rod.segMeshes, ...rod.jointMeshes];
+      meshes.forEach(m => {
+        m.material.transparent = true;
+        m.material.opacity = 0;
+        m.userData._entranceTargetY = m.position.y;
+        m.position.y = m.position.y + ROD_ENTRANCE_DROP;
+      });
+    });
+  }
+
+  function playRodsEntrance(rodList, baseDelay = 0) {
+    const STAGGER = 0.22;
+    const DURATION = 0.55;
+    rodList.forEach((rod, i) => {
+      const meshes = [...rod.segMeshes, ...rod.jointMeshes];
+      const delay = baseDelay + i * STAGGER;
+      meshes.forEach(m => {
+        const targetY = m.userData._entranceTargetY != null
+          ? m.userData._entranceTargetY
+          : m.position.y;
+        gsap.to(m.material, {
+          opacity: 1,
+          duration: DURATION,
+          delay,
+          ease: 'power2.out',
+          overwrite: 'auto',
+        });
+        gsap.to(m.position, {
+          y: targetY,
+          duration: DURATION,
+          delay,
+          ease: 'power3.out',
+          overwrite: 'auto',
+        });
+      });
+    });
+  }
+
+  function scheduleEntrance(rodList) {
+    primeRodsEntrance(rodList);
+    const fire = () => {
+      if (_gridEntranceMat) {
+        gsap.to(_gridEntranceMat, {
+          opacity: 1, duration: GRID_ENTRANCE_DURATION,
+          ease: 'power2.out', overwrite: 'auto',
+        });
+      }
+      playRodsEntrance(rodList, GRID_ENTRANCE_DURATION * 0.5);
+    };
+    if (document.body.classList.contains('mode-game')) {
+      fire();
+    } else {
+      _pendingEntrance = fire;
+    }
+  }
+
+  function flushPendingEntrance() {
+    if (_pendingEntrance) {
+      const fn = _pendingEntrance;
+      _pendingEntrance = null;
+      fn();
+    }
+  }
+
   // Per-load seed so each entry into a level scrambles rods differently. Reset
   // button reuses the same seed; navigating away and re-entering generates fresh.
   let activeScramble = null;  // { idx, seed }
@@ -451,7 +534,9 @@ export function initGame() {
     document.getElementById('lvl-num').textContent = idx + 1;
     buildGridDots();
     floatGrid.clear();
-    lvl.rods.forEach(r => rods.push(makeRod(r)));
+    const newRods = lvl.rods.map(r => makeRod(r));
+    newRods.forEach(r => rods.push(r));
+    scheduleEntrance(newRods);
     drawGoalPreview(document.getElementById('goal-canvas'), lvl.goalPaths);
     goalShape = buildGoalShapeData();
     lastProjectionStats = null;
@@ -509,9 +594,12 @@ export function initGame() {
   }
 
   // Sample a segment at intervals ≤ step (always includes both endpoints).
-  function sampleSegment(s, e, step) {
+  // Pass minN > 2 to enforce a minimum sample count regardless of length, so
+  // the per-segment coverage ratio resolves to the same effective stringency
+  // for short and long segments.
+  function sampleSegment(s, e, step, minN = 2) {
     const len = Math.hypot(e[0] - s[0], e[1] - s[1]);
-    const n = Math.max(2, Math.ceil(len / step) + 1);
+    const n = Math.max(minN, Math.ceil(len / step) + 1);
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
@@ -522,46 +610,47 @@ export function initGame() {
 
   function measureGeometricMatch(rodShape, goalShape) {
     if (!rodShape || !goalShape) {
-      return { matched: false, rodCoverage: 0, goalCoverage: 0, junctionsHit: 0, junctionsTotal: 0 };
+      return { matched: false, rodCoverage: 0, goalCoverage: 0 };
     }
     const rodSegs  = rodShape.segments;
     const goalSegs = goalShape.segments;
-    const junctions = goalShape.points;
+    if (rodSegs.length === 0 || goalSegs.length === 0) {
+      return { matched: false, rodCoverage: 0, goalCoverage: 0 };
+    }
 
-    let goalSamples = 0, goalCovered = 0;
+    // Min per-segment coverage (not a global average): one misplaced stroke in
+    // a complex goal would otherwise be diluted by the well-aligned rest.
+    // No vertex/junction check — a level can have multiple valid solutions whose
+    // rod-corner positions don't line up with the goal's segment subdivisions.
+    let minGoalSegCov = 1;
     for (const [s, e] of goalSegs) {
-      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP);
+      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP, GEO_MIN_SAMPLES_PER_SEG);
+      let covered = 0;
       for (const [px, py] of pts) {
-        goalSamples++;
-        if (distPointToShape(px, py, rodSegs) <= GEO_EPSILON) goalCovered++;
+        if (distPointToShape(px, py, rodSegs) <= GEO_EPSILON) covered++;
       }
+      const cov = covered / pts.length;
+      if (cov < minGoalSegCov) minGoalSegCov = cov;
     }
 
-    let rodSamples = 0, rodCovered = 0;
+    let minRodSegCov = 1;
     for (const [s, e] of rodSegs) {
-      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP);
+      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP, GEO_MIN_SAMPLES_PER_SEG);
+      let covered = 0;
       for (const [px, py] of pts) {
-        rodSamples++;
-        if (distPointToShape(px, py, goalSegs) <= GEO_EPSILON) rodCovered++;
+        if (distPointToShape(px, py, goalSegs) <= GEO_EPSILON) covered++;
       }
+      const cov = covered / pts.length;
+      if (cov < minRodSegCov) minRodSegCov = cov;
     }
 
-    let junctionsHit = 0;
-    for (const [jx, jy] of junctions) {
-      let hit = false;
-      for (const [px, py] of rodShape.points) {
-        if (Math.hypot(jx - px, jy - py) <= GEO_JUNCTION_EPS) { hit = true; break; }
-      }
-      if (hit) junctionsHit++;
-    }
-
-    const goalCoverage = goalSamples > 0 ? goalCovered / goalSamples : 0;
-    const rodCoverage  = rodSamples  > 0 ? rodCovered  / rodSamples  : 0;
+    const matched = minGoalSegCov >= GEO_MIN_SEGMENT_COVERAGE
+                 && minRodSegCov  >= GEO_MIN_SEGMENT_COVERAGE;
 
     return {
-      matched: goalCoverage >= GEO_MIN_COVERAGE && rodCoverage >= GEO_MIN_COVERAGE,
-      goalCoverage, rodCoverage,
-      junctionsHit, junctionsTotal: junctions.length,
+      matched,
+      goalCoverage: minGoalSegCov,
+      rodCoverage:  minRodSegCov,
     };
   }
 
@@ -659,12 +748,11 @@ export function initGame() {
     if (!goalShape)            { stats.textContent = 'Waiting for level...'; return; }
     if (!lastProjectionStats)  { stats.textContent = 'Move a line or rotate the camera to evaluate.'; return; }
 
-    const { rodCoverage, goalCoverage, junctionsHit, junctionsTotal, matched } = lastProjectionStats;
+    const { rodCoverage, goalCoverage, matched } = lastProjectionStats;
     stats.textContent =
       `matched: ${matched}\n` +
-      `goal cov: ${goalCoverage.toFixed(3)}  (≥ ${GEO_MIN_COVERAGE})\n` +
-      `rod  cov: ${rodCoverage.toFixed(3)}\n` +
-      `corners: ${junctionsHit}/${junctionsTotal}`;
+      `min goal seg cov: ${goalCoverage.toFixed(3)}  (≥ ${GEO_MIN_SEGMENT_COVERAGE})\n` +
+      `min rod  seg cov: ${rodCoverage.toFixed(3)}`;
   }
 
   function buildProjectedRodShape() {
@@ -1149,6 +1237,7 @@ export function initGame() {
 
     document.body.classList.remove('mode-home', 'mode-levels', 'mode-game');
     document.body.classList.add('mode-' + mode);
+    if (isGame) flushPendingEntrance();
 
     homeScreen.classList.toggle('visible', isHome);
     levelsScreen.classList.toggle('visible', isLevels);
@@ -1167,7 +1256,7 @@ export function initGame() {
 
     renderer.domElement.style.pointerEvents = isGame ? 'auto' : 'none';
     if (isLevels) {
-      levelPage = Math.floor(currentLevel / 20);
+      levelPage = Math.floor(currentLevel / 10);
       buildLevelTiles();
     }
   }
@@ -1199,8 +1288,8 @@ export function initGame() {
       hoverRod.style.height = (tileRect.height + bw) + 'px';
       hoverRod.classList.add('visible');
     };
-    const start = levelPage * 20;
-    const end   = Math.min(start + 20, LEVELS.length);
+    const start = levelPage * 10;
+    const end   = Math.min(start + 10, LEVELS.length);
     const rowsThisPage = Math.max(1, Math.ceil((end - start) / 5));
     grid.style.backgroundSize = `20% ${100 / rowsThisPage}%`;
     for (let idx = start; idx < end; idx++) {
@@ -1208,7 +1297,14 @@ export function initGame() {
       tile.className     = 'level-tile' + (completedLevels.has(idx) ? ' completed' : '');
       tile.type          = 'button';
       tile.dataset.level = String(idx);
-      tile.textContent   = String(idx + 1);
+      const num = document.createElement('span');
+      num.className   = 'tile-num';
+      num.textContent = String(idx + 1);
+      tile.appendChild(num);
+      const thumb = document.createElement('canvas');
+      thumb.className = 'tile-thumb';
+      thumb.setAttribute('aria-hidden', 'true');
+      tile.appendChild(thumb);
       tile.addEventListener('mouseenter', () => moveHoverTo(tile));
       tile.addEventListener('pointerenter', () => moveHoverTo(tile));
       tile.addEventListener('click', () => {
@@ -1228,6 +1324,13 @@ export function initGame() {
       });
       grid.appendChild(tile);
     }
+    // Draw goal thumbnails after tiles are in the DOM so canvas.clientWidth
+    // resolves to the real pixel size for HiDPI sampling in drawGoalPreview.
+    const thumbs = grid.querySelectorAll('.level-tile .tile-thumb');
+    thumbs.forEach((thumb, i) => {
+      const lvl = LEVELS[start + i];
+      if (lvl) drawGoalPreview(thumb, lvl.goalPaths, { transparent: true });
+    });
     if (!grid.dataset.hoverBound) {
       grid.addEventListener('mouseleave', () => {
         const r = grid.querySelector('#level-hover-rod');
@@ -1257,6 +1360,164 @@ export function initGame() {
     if (prevBtn) prevBtn.disabled = levelPage === 0;
     if (nextBtn) nextBtn.disabled = end >= LEVELS.length;
     updateActiveTile();
+    updatePageIndicator();
+  }
+
+  function updatePageIndicator() {
+    const wrap = document.getElementById('page-indicator');
+    if (!wrap) return;
+    const totalPages = Math.max(1, Math.ceil(LEVELS.length / 10));
+    const existingDots = wrap.querySelectorAll('.page-dot');
+    if (existingDots.length !== totalPages + 1) {
+      existingDots.forEach(d => d.remove());
+      for (let i = 0; i <= totalPages; i++) {
+        const d = document.createElement('div');
+        d.className = 'page-dot';
+        d.dataset.idx = String(i);
+        d.style.left = `${(i / totalPages) * 100}%`;
+        wrap.appendChild(d);
+      }
+    }
+    let rod = wrap.querySelector('.page-rod');
+    if (!rod) {
+      rod = document.createElement('div');
+      rod.className = 'page-rod';
+      const jl = document.createElement('span'); jl.className = 'rod-joint rod-joint-l'; rod.appendChild(jl);
+      const jr = document.createElement('span'); jr.className = 'rod-joint rod-joint-r'; rod.appendChild(jr);
+      wrap.appendChild(rod);
+    }
+    if (!rod.classList.contains('dragging')) {
+      const safePage = Math.min(Math.max(0, levelPage), totalPages - 1);
+      rod.style.left = `${(safePage / totalPages) * 100}%`;
+      rod.style.width = `${(1 / totalPages) * 100}%`;
+    }
+    const rangeWrap = document.getElementById('page-range');
+    if (rangeWrap) {
+      let span = rangeWrap.querySelector('.page-range-text');
+      if (!span) {
+        span = document.createElement('span');
+        span.className = 'page-range-text';
+        rangeWrap.appendChild(span);
+      }
+      const safePage = Math.min(Math.max(0, levelPage), totalPages - 1);
+      const startLvl = safePage * 10 + 1;
+      const endLvl = Math.min(safePage * 10 + 10, LEVELS.length);
+      const newText = `${startLvl}~${endLvl}`;
+      const newLeft = (safePage / totalPages) * 100;
+      const newWidth = (1 / totalPages) * 100;
+      const apply = () => {
+        span.textContent = newText;
+        span.style.left = `${newLeft}%`;
+        span.style.width = `${newWidth}%`;
+        span.dataset.text = newText;
+      };
+      const oldText = span.dataset.text;
+      if (!oldText) {
+        // First render: set instantly without fade.
+        apply();
+      } else if (oldText !== newText) {
+        // Fade out at the old segment, then swap text + position, then fade
+        // back in at the new segment. No horizontal transition — the label
+        // teleports between segments via the opacity dip.
+        if (span._swapTimer) clearTimeout(span._swapTimer);
+        span.style.opacity = '0';
+        span._swapTimer = setTimeout(() => {
+          apply();
+          span.style.opacity = '';
+          span._swapTimer = null;
+        }, 220);
+      }
+    }
+    bindPageIndicatorInteractions();
+  }
+
+  // Drag-commit reuses the same column-staggered leave/enter animation as
+  // arrow clicks. `interrupt: true` cancels any in-flight swap so rapid
+  // mid-drag page crossings replace each other cleanly instead of being
+  // dropped by the pageSwapAnimating guard.
+  function commitDragPage(newPage) {
+    if (newPage === levelPage) return;
+    const dir = newPage > levelPage ? 'right' : 'left';
+    animatePageSwap(newPage, dir, true);
+  }
+
+  function bindPageIndicatorInteractions() {
+    const wrap = document.getElementById('page-indicator');
+    if (!wrap || wrap.dataset.bound) return;
+    wrap.dataset.bound = '1';
+    let dragState = null;
+    wrap.addEventListener('pointerdown', (e) => {
+      if (pageSwapAnimating) return;
+      const rod = wrap.querySelector('.page-rod');
+      if (!rod || !e.target.closest('.page-rod')) return;
+      e.preventDefault();
+      try { rod.setPointerCapture(e.pointerId); } catch(_) {}
+      rod.classList.add('dragging');
+      const rect = wrap.getBoundingClientRect();
+      const totalPages = Math.max(1, Math.ceil(LEVELS.length / 10));
+      const segWidth = 1 / totalPages;
+      dragState = {
+        pointerId: e.pointerId,
+        wrapLeft: rect.left,
+        wrapWidth: rect.width,
+        totalPages,
+        segWidth,
+        startPage: levelPage,
+        // Pointer's offset from rod's left edge, as a fraction of the wrap width.
+        // Used so the rod follows the pointer without snapping to its own left edge.
+        grabOffset: ((e.clientX - rect.left) / rect.width) - (levelPage * segWidth),
+        lastSnapPage: levelPage,
+      };
+    });
+    wrap.addEventListener('pointermove', (e) => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      const rod = wrap.querySelector('.page-rod');
+      if (!rod) return;
+      const ratio = (e.clientX - dragState.wrapLeft) / dragState.wrapWidth;
+      let segLeft = ratio - dragState.grabOffset;
+      segLeft = Math.max(0, Math.min(1 - dragState.segWidth, segLeft));
+      // Apply the same magnetic-snap easing as the in-game rod: integer page
+      // positions act as snap points (within SNAP_BUFFER they stick exactly,
+      // beyond SNAP_RANGE_END they follow 1:1, with smoothstep resistance in
+      // between).
+      const magnetised = magnetize(segLeft * dragState.totalPages);
+      const clamped = Math.max(0, Math.min(dragState.totalPages - 1, magnetised));
+      rod.style.left = `${(clamped / dragState.totalPages) * 100}%`;
+      // When the rod enters a different page's snap zone, commit the page
+      // change RIGHT NOW: tiles + page-range update while the rod continues
+      // following the cursor. Goes beyond the in-game rod (which only commits
+      // on release) per design request — drag-to-preview-pages.
+      const snapPage = Math.round(clamped);
+      if (snapPage !== dragState.lastSnapPage && Math.abs(clamped - snapPage) <= SNAP_BUFFER) {
+        dragState.lastSnapPage = snapPage;
+        commitDragPage(snapPage);
+        pulseSnap();
+      }
+    });
+    const finishDrag = (e) => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      const rod = wrap.querySelector('.page-rod');
+      const totalPages = dragState.totalPages;
+      let targetPage = levelPage;
+      if (rod) {
+        try { rod.releasePointerCapture(e.pointerId); } catch(_) {}
+        const computedLeftPct = parseFloat(rod.style.left) || 0;
+        targetPage = Math.max(0, Math.min(totalPages - 1, Math.round((computedLeftPct / 100) * totalPages)));
+        rod.classList.remove('dragging');
+        rod.style.left = `${(targetPage / totalPages) * 100}%`;
+        rod.style.width = `${(1 / totalPages) * 100}%`;
+      }
+      dragState = null;
+      // If the page already committed mid-drag (snap-zone crossing), the
+      // pages match here and no swap is needed. Otherwise — released in the
+      // resistance band — fall back to the leave/enter animation for the
+      // final commit.
+      if (targetPage !== levelPage) {
+        animatePageSwap(targetPage, targetPage > levelPage ? 'right' : 'left');
+      }
+    };
+    wrap.addEventListener('pointerup', finishDrag);
+    wrap.addEventListener('pointercancel', finishDrag);
   }
 
   function ndc(clientX, clientY) {
@@ -1645,8 +1906,27 @@ export function initGame() {
   document.getElementById('back-levels').addEventListener('click', () => setMode('home'));
 
   let pageSwapAnimating = false;
-  function animatePageSwap(newPage, dir) {
-    if (pageSwapAnimating) return;
+  let pageSwapState = null; // { timers: [], tilesToClean: [{tile, classes}] }
+  function abortPageSwap() {
+    if (!pageSwapState) return;
+    pageSwapState.timers.forEach(clearTimeout);
+    pageSwapState.tilesToClean.forEach(({ tile, classes }) => {
+      classes.forEach(c => tile.classList.remove(c));
+      tile.style.transitionDelay = '';
+      tile.style.animationDelay = '';
+    });
+    pageSwapState = null;
+    document.body.classList.remove('page-swapping', 'page-swap-cooldown');
+    pageSwapAnimating = false;
+  }
+  // When `interrupt` is true (used by drag-commit), any in-flight swap is
+  // cancelled and a fresh one starts. When false (used by arrow clicks), an
+  // in-flight swap is left alone and this call is dropped.
+  function animatePageSwap(newPage, dir, interrupt = false) {
+    if (pageSwapAnimating) {
+      if (!interrupt) return;
+      abortPageSwap();
+    }
     const grid = document.getElementById('level-grid');
     if (!grid) { levelPage = newPage; buildLevelTiles(); return; }
     pageSwapAnimating = true;
@@ -1660,29 +1940,34 @@ export function initGame() {
     const LEAVE_DURATION = 180;
     const ENTER_DURATION = 350;
     const colDelayUnits = (i) => dir === 'right' ? (i % COLS) : (LAST_COL - (i % COLS));
+    pageSwapState = { timers: [], tilesToClean: [] };
+    const state = pageSwapState;
     const oldTiles = Array.from(grid.querySelectorAll('.level-tile'));
     oldTiles.forEach((t, i) => {
       t.style.transitionDelay = `${colDelayUnits(i) * LEAVE_STAGGER}ms`;
       t.classList.add(leaveCls);
+      state.tilesToClean.push({ tile: t, classes: [leaveCls] });
     });
     const leaveTotal = LEAVE_DURATION + LEAVE_STAGGER * LAST_COL;
     const enterTotal = ENTER_DURATION + ENTER_STAGGER * LAST_COL;
-    setTimeout(() => {
+    state.timers.push(setTimeout(() => {
       levelPage = newPage;
       buildLevelTiles();
       const newTiles = Array.from(grid.querySelectorAll('.level-tile'));
       newTiles.forEach((t, i) => {
         t.style.animationDelay = `${colDelayUnits(i) * ENTER_STAGGER}ms`;
         t.classList.add(enterCls);
+        state.tilesToClean.push({ tile: t, classes: [enterCls] });
       });
-      setTimeout(() => {
+      state.timers.push(setTimeout(() => {
         newTiles.forEach(t => {
           t.classList.remove(enterCls);
           t.style.animationDelay = '';
         });
-      }, enterTotal + 50);
-      setTimeout(() => {
+      }, enterTotal + 50));
+      state.timers.push(setTimeout(() => {
         pageSwapAnimating = false;
+        pageSwapState = null;
         document.body.classList.remove('page-swapping');
         document.body.classList.add('page-swap-cooldown');
         const clearCooldown = () => {
@@ -1692,8 +1977,8 @@ export function initGame() {
         };
         window.addEventListener('mousemove', clearCooldown);
         window.addEventListener('pointermove', clearCooldown);
-      }, enterTotal);
-    }, leaveTotal);
+      }, enterTotal));
+    }, leaveTotal));
   }
 
   document.getElementById('prev-page').addEventListener('click', () => {
@@ -1702,7 +1987,7 @@ export function initGame() {
   });
   document.getElementById('next-page').addEventListener('click', () => {
     if (pageSwapAnimating) return;
-    if ((levelPage + 1) * 20 < LEVELS.length) animatePageSwap(levelPage + 1, 'right');
+    if ((levelPage + 1) * 10 < LEVELS.length) animatePageSwap(levelPage + 1, 'right');
   });
 
   // Soft reset: keep meshes, animate rod paths back to their level-start state and

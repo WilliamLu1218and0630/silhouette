@@ -30,20 +30,18 @@
 #game-canvas-wrap {
 	position: absolute;
 	left: 50%;
-	top: 62.5%;
+	top: 68%;
 	transform: translate(-50%, -50%);
 	z-index: 1;
 	/* 其他樣式由 JS 控制 */
 }
 #game-canvas-wrap canvas{
 	opacity:0;
-	transform:translateY(0);
-	transition:opacity 1s cubic-bezier(0.4,0,0.2,1), transform 1s cubic-bezier(0.4,0,0.2,1);
+	transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
 }
 body.mode-game #game-canvas-wrap canvas{
 	opacity:1;
-	transform:translateY(60px);
-	transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s, transform 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
+	transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
 }
 :root {
 --bg:#f5f5f0;
@@ -358,10 +356,7 @@ pointer-events:none;
 .page-arrow:disabled{cursor:default;pointer-events:none;opacity:0.18;}
 .page-arrow:disabled:hover::after{opacity:0;}
 .level-grid-wrap{
-width:min(340px, 72vw);
-display:flex;
-flex-direction:column;
-gap:0.9rem;
+width:min(480px, 86vw);
 }
 #level-grid{
 position:relative;
@@ -370,10 +365,10 @@ grid-template-columns:repeat(5,1fr);
 gap:0;
 padding:2px;
 background:
-  radial-gradient(circle at 0 0, #c8c8c0 1.3px, transparent 1.8px),
-  radial-gradient(circle at 100% 0, #c8c8c0 1.3px, transparent 1.8px),
-  radial-gradient(circle at 0 100%, #c8c8c0 1.3px, transparent 1.8px),
-  radial-gradient(circle at 100% 100%, #c8c8c0 1.3px, transparent 1.8px);
+  radial-gradient(circle at 0 0, var(--text) 1.3px, transparent 1.8px),
+  radial-gradient(circle at 100% 0, var(--text) 1.3px, transparent 1.8px),
+  radial-gradient(circle at 0 100%, var(--text) 1.3px, transparent 1.8px),
+  radial-gradient(circle at 100% 100%, var(--text) 1.3px, transparent 1.8px);
 background-size:20% 25%;
 background-origin:content-box;
 background-clip:border-box;
@@ -393,7 +388,6 @@ justify-content:center;
 border:none;
 background:transparent;
 color:var(--text);
-opacity:0.35;
 cursor:pointer;
 font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
 font-size:1rem;
@@ -402,8 +396,38 @@ transition:background 0.18s,color 0.18s,opacity 0.18s,transform 0.55s cubic-bezi
 border-radius:0;
 pointer-events:all;
 }
-.level-tile.completed{
+.level-tile .tile-num{
+position:absolute;
+inset:0;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:2.6rem;
+font-weight:300;
+letter-spacing:0;
+color:var(--text);
+opacity:0.6;
+z-index:0;
+pointer-events:none;
+}
+.level-tile .tile-thumb{
+position:absolute;
+inset:6%;
+width:88%;
+height:88%;
+z-index:1;
+pointer-events:none;
+display:block;
+opacity:0.18;
+transition:opacity 0.22s;
+}
+.level-tile:hover .tile-thumb,
+.level-tile.selected .tile-thumb,
+.level-tile.completed .tile-thumb{
 opacity:1;
+}
+.level-tile.completed .tile-num{
+opacity:0.1;
 }
 body.page-swapping #level-grid,
 body.page-swapping #level-grid .level-tile,
@@ -417,7 +441,6 @@ body.page-swap-cooldown #level-grid .level-tile{pointer-events:none !important;}
 .level-tile:hover,
 .level-tile.selected{
 color:var(--text);
-opacity:1;
 }
 #level-hover-rod{
 position:absolute;
@@ -441,6 +464,91 @@ body.mode-game #level-grid{opacity:0 !important;transition:none !important;}
 #level-grid{transition:opacity 0.25s;}
 body.mode-game #level-hover-rod{opacity:0 !important;transition:none !important;}
 .level-tile{z-index:2;}
+#page-indicator{
+position:relative;
+width:min(480px, 86vw);
+height:18px;
+margin-top:-0.2rem;
+opacity:0;
+transition:opacity 1s;
+pointer-events:none;
+touch-action:none;
+}
+body.mode-levels #page-indicator{opacity:1;transition:opacity 1s 3s;}
+body.mode-levels #page-indicator .page-rod{pointer-events:auto;}
+body.going-to-game #page-indicator{opacity:0 !important;transition:opacity 0.5s !important;pointer-events:none !important;}
+body.mode-game #page-indicator{opacity:0 !important;transition:none !important;pointer-events:none !important;}
+body.page-swapping #page-indicator,
+body.page-swap-cooldown #page-indicator{pointer-events:none !important;}
+#page-indicator .page-dot{
+position:absolute;
+top:50%;
+width:2.6px;height:2.6px;
+background:var(--text);
+border-radius:50%;
+transform:translate(-50%,-50%);
+z-index:2;
+pointer-events:none;
+}
+#page-indicator .page-rod{
+position:absolute;
+top:50%;
+height:2px;
+background:var(--text);
+transform:translateY(-50%);
+border-radius:1px;
+z-index:1;
+cursor:grab;
+transition:left 0.45s cubic-bezier(0.4,0,0.2,1),
+           width 0.45s cubic-bezier(0.4,0,0.2,1),
+           height 0.18s;
+}
+#page-indicator .page-rod::before{
+content:'';
+position:absolute;
+inset:-8px 0;
+}
+#page-indicator .page-rod:hover{height:3px;}
+#page-indicator .page-rod.dragging{
+cursor:grabbing;
+transition:height 0.18s;
+height:3px;
+}
+#page-indicator .rod-joint{
+position:absolute;
+top:50%;
+width:5px;height:5px;
+background:var(--text);
+border-radius:50%;
+transform:translate(-50%,-50%);
+pointer-events:none;
+}
+#page-indicator .rod-joint-l{left:0;}
+#page-indicator .rod-joint-r{left:100%;}
+#page-range{
+position:relative;
+width:min(480px, 86vw);
+height:1.4em;
+font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
+font-size:0.72rem;
+letter-spacing:0.18em;
+color:var(--text);
+font-variant-numeric:tabular-nums;
+margin-top:-0.05rem;
+opacity:0;
+transition:opacity 1s;
+pointer-events:none;
+}
+#page-range .page-range-text{
+position:absolute;
+top:0;
+display:block;
+text-align:center;
+transition:opacity 0.22s;
+}
+body.mode-levels #page-range{opacity:0.55;transition:opacity 1s 3s;}
+body.going-to-game #page-range{opacity:0 !important;transition:opacity 0.5s !important;}
+body.mode-game #page-range{opacity:0 !important;transition:none !important;}
 /* === Settings Button & Panel === */
 #settings-btn{
 position:absolute;
@@ -632,7 +740,9 @@ min-width:260px;
   #goal-wrap{top:2.8rem;}
   #goal-canvas{width:120px;height:120px;}
   #debug-wrap{bottom:1rem;left:0.7rem;padding:0.5rem;}
-  .level-grid-wrap{width:min(320px, 78vw);}
+  .level-grid-wrap{width:min(420px, 90vw);}
+  #page-indicator{width:min(420px, 90vw);}
+  #page-range{width:min(420px, 90vw);}
   .levels-row{gap:0.3rem;}
   .page-arrow{font-size:1.5rem;width:2rem;height:2rem;}
   .level-tile{font-size:0.95rem;}
@@ -705,6 +815,8 @@ pointer-events:none !important;
 </div>
 <button class="page-arrow" id="next-page" aria-label="Next"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none" aria-hidden="true" style="display:block"><path d="M8 4 L18 12 L8 20 Z"/></svg></button>
 </div>
+<div id="page-indicator" aria-hidden="true"></div>
+<div id="page-range" aria-hidden="true"></div>
 </div>
 
 <div id="hud">
