@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; }
+body { background: #555; display: flex; justify-content: center; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1200" height="630"></canvas>
+<script>
+const W = 1200, H = 630;
+const goalPaths = [
+  [[2.2929, 3.8165], [2.2929, 3],      [1.5858, 2.5918], [2.2929, 2.1835], [2.2929, 1.367]],
+  [[1.5858, 2.5918], [1.5858, 3.4082], [2.2929, 3.8165], [2.2929, 3]],
+  [[2.2929, 3.8165], [3,      3.4082], [3.7071, 3.8165], [3.7071, 3],      [3, 2.5918],      [3, 3.4082]],
+  [[3.7071, 3.8165], [4.4142, 3.4082], [4.4142, 2.5918], [3.7071, 3],      [4.4142, 2.5918], [3.7071, 2.1835], [3, 2.5918]],
+  [[3,      1.7753], [3.7071, 1.367],  [3,      0.9588], [2.2929, 1.367],  [3, 1.7753]],
+  [[2.2929, 3],      [3,      2.5918], [2.2929, 2.1835], [3,      2.5918], [3, 1.7753]],
+  [[3.7071, 2.1835], [3.7071, 1.367]],
+];
+
+const BG   = '#f5f5f0';
+const LINE = '#1a1a2e';
+const DOT  = '#c8c8c0';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Background
+ctx.fillStyle = BG;
+ctx.fillRect(0, 0, W, H);
+
+// Geometry
+const allNodes = [];
+const seen = new Set();
+for (const path of goalPaths)
+  for (const [gx, gz] of path) {
+    const k = `${gx},${gz}`;
+    if (!seen.has(k)) { seen.add(k); allNodes.push([gx, gz]); }
+  }
+const xs = allNodes.map(p => p[0]), zs = allNodes.map(p => p[1]);
+const minX = Math.min(...xs), minZ = Math.min(...zs);
+const spanX = Math.max(...xs) - minX, spanZ = Math.max(...zs) - minZ;
+
+const S    = Math.min(W, H) * 0.78;
+const cell = Math.min(S / (spanX + 1.4), S / (spanZ + 1.4));
+const ox   = (W - cell * spanX) / 2 - minX * cell;
+const oz   = (H - cell * spanZ) / 2 - minZ * cell;
+const toC  = (gx, gz) => [ox + gx * cell, oz + gz * cell];
+
+const LINE_W = Math.max(3, cell * 0.037);
+const DOT_R  = Math.max(2, cell * 0.022);
+
+// Grid dots
+ctx.fillStyle = DOT;
+const gxMin = Math.floor(minX - 0.7), gxMax = Math.ceil(minX + spanX + 0.7);
+const gzMin = Math.floor(minZ - 0.7), gzMax = Math.ceil(minZ + spanZ + 0.7);
+for (let gx = gxMin; gx <= gxMax; gx++)
+  for (let gz = gzMin; gz <= gzMax; gz++) {
+    const [px, pz] = toC(gx, gz);
+    if (px > DOT_R && px < W - DOT_R && pz > DOT_R && pz < H - DOT_R) {
+      ctx.beginPath();
+      ctx.arc(px, pz, DOT_R, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+// Goal lines
+ctx.strokeStyle = LINE;
+ctx.lineWidth   = LINE_W;
+ctx.lineCap     = 'round';
+ctx.lineJoin    = 'round';
+for (const path of goalPaths) {
+  ctx.beginPath();
+  const [x0, y0] = toC(...path[0]);
+  ctx.moveTo(x0, y0);
+  for (let i = 1; i < path.length; i++) {
+    const [x, y] = toC(...path[i]);
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// Title overlay — wait for font load
+document.fonts.ready.then(() => {
+  const fontSize = Math.round(H * 0.175);
+  ctx.font      = `800 ${fontSize}px 'Nunito', sans-serif`;
+  ctx.fillStyle = 'rgba(26, 26, 46, 0.12)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Silhouette', W / 2, H / 2);
+  canvas.dataset.ready = '1';
+});
+</script>
+</body>
+</html>
