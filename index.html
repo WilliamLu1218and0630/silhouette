@@ -27,745 +27,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Nunito:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-#game-canvas-wrap {
-	position: absolute;
-	left: 50%;
-	top: 68%;
-	transform: translate(-50%, -50%);
-	z-index: 1;
-	/* 其他樣式由 JS 控制 */
-}
-#game-canvas-wrap canvas{
-	opacity:0;
-	transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
-}
-body.mode-game #game-canvas-wrap canvas{
-	opacity:1;
-	transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
-}
-:root {
---bg:#f5f5f0;
---text:#1a1a2e;
---muted:#8888a0;
---accent:#e94560;
---border:#d8d8d0;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-html,body{overscroll-behavior:none;touch-action:pinch-zoom;}
-body{
-background:var(--bg);
-color:var(--text);
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-overflow:hidden;
-width:100vw;height:100vh;
-height:100dvh;
-user-select:none;
--webkit-user-select:none;
--webkit-tap-highlight-color:transparent;
--webkit-touch-callout:none;
-}
-
-/* Cloak everything until the game is ready, to avoid HUD/debug FOUC */
-body.loading > *:not(#app-loader){visibility:hidden !important;}
-#app-loader{
-position:fixed;inset:0;
-background:var(--bg);
-display:flex;align-items:center;justify-content:center;
-z-index:9999;
-transition:opacity 0.35s cubic-bezier(0.4,0,0.2,1);
-}
-#app-loader::before{
-content:'';
-width:28px;height:28px;
-border:2px solid var(--border);
-border-top-color:var(--text);
-border-radius:50%;
-animation:app-spin 0.8s linear infinite;
-}
-@keyframes app-spin{to{transform:rotate(360deg);}}
-body:not(.loading) #app-loader{
-opacity:0;
-pointer-events:none;
-}
-button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
-#hud{
-position:absolute;top:0;left:0;right:0;
-display:grid;grid-template-columns:1fr auto 1fr;align-items:flex-start;
-padding:1.4rem 2rem;
-pointer-events:none;z-index:10;
-}
-#level-block{display:flex;flex-direction:column;gap:0.2rem;grid-column:2;justify-self:center;}
-#level-tag{font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--muted);}
-/* #hint removed – instructions moved to in-game help popup */
-#goal-wrap{
-position:absolute;top:3.5rem;left:50%;transform:translateX(-50%);
-z-index:10;
-display:flex;flex-direction:column;align-items:center;gap:0.35rem;
-pointer-events:none;
-}
-#goal-canvas{
-border:1px solid var(--border);background:#fff;
-pointer-events:auto;cursor:zoom-in;
-transform-origin:top center;
-transition:transform 0.25s cubic-bezier(0.4,0,0.2,1),box-shadow 0.25s;
-/* Hint the browser to use high-quality resampling when CSS scales the canvas */
-image-rendering:auto;
-image-rendering:high-quality;
--webkit-backface-visibility:hidden;
-backface-visibility:hidden;
-}
-#goal-canvas:hover,#goal-canvas.zoomed{
-transform:scale(1.6);
-box-shadow:0 4px 24px rgba(0,0,0,0.12);
-cursor:zoom-out;
-}
-#almost-hint{
-font-family:'JetBrains Mono','Inter',monospace;
-font-size:0.7rem;letter-spacing:0.16em;text-transform:uppercase;
-color:var(--accent);
-opacity:0;
-transition:opacity 0.3s;
-pointer-events:none;
-}
-#almost-hint.visible{opacity:1;}
-#debug-wrap{
-position:absolute;bottom:1.8rem;left:2rem;
-display:flex;flex-direction:column;align-items:flex-start;gap:0.45rem;
-z-index:10;
-padding:0.7rem;
-border:1px solid var(--border);
-background:rgba(255,255,255,0.92);
-backdrop-filter:blur(3px);
-}
-#debug-tag{font-size:0.65rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);}
-#debug-canvases{display:flex;gap:0.55rem;}
-.debug-block{display:flex;flex-direction:column;gap:0.25rem;}
-.debug-label{font-size:0.6rem;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;}
-.debug-canvas{border:1px solid var(--border);background:#fff;}
-#debug-stats{
-font-size:0.68rem;
-line-height:1.5;
-color:var(--text);
-white-space:pre-line;
-font-variant-numeric:tabular-nums;
-}
-.overlay{
-position:absolute;inset:0;
-display:flex;flex-direction:column;
-align-items:center;justify-content:center;gap:1.5rem;
-z-index:20;
-background:rgba(245,245,240,0.88);
-backdrop-filter:blur(5px);
-opacity:0;
-pointer-events:none;
-transition:opacity 0.45s cubic-bezier(0.4,0,0.2,1);
-}
-.overlay.visible {
-opacity:1;
-pointer-events:auto;
-}
-.overlay .btn {
-pointer-events:none;
-}
-.overlay.visible .btn {
-pointer-events:auto;
-}
-.overlay-title{font-size:2.4rem;letter-spacing:0.04em;font-family:'Nunito','Taipei Sans TC Beta',sans-serif;font-weight:700;}
-#level-tag,#debug-tag,.debug-label,.overlay-sub,#debug-stats{font-family:'JetBrains Mono','Inter',monospace;}
-.overlay-sub{font-size:0.82rem;color:var(--muted);letter-spacing:0.1em;}
-.btn{
-padding:0.55rem 2rem;
-border:1.5px solid var(--text);background:transparent;
-color:var(--text);
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:0.82rem;letter-spacing:0.12em;cursor:pointer;
-transition:background 0.18s,color 0.18s;
-pointer-events:all;
-}
-.btn:hover{background:var(--text);color:var(--bg);}
-#start-btn{
-border:none;background:transparent;
-padding:0;
-font-size:2.4rem;line-height:1;letter-spacing:0;
-display:inline-flex;align-items:center;justify-content:center;
-position:relative;
-}
-#start-btn::after{
-content:'';
-position:absolute;inset:0;
-pointer-events:none;
-}
-#start-btn:hover,#start-btn.clicked,#start-btn:active,#start-btn:focus{
-background:transparent;color:var(--text);
-}
-/* Enlarged invisible hit area for triangle buttons (mobile-friendly) */
-#start-btn::before,.page-arrow::before{
-content:'';
-position:absolute;
-inset:-16px;
-}
-#start-btn::before{inset:-22px;}
-#start-btn:hover::after{opacity:1;transition:opacity 0.25s;}
-#start-btn.clicked::after{opacity:1;transition:opacity 0s;}
-#start-btn{transition:opacity 0.5s,transform 0.5s cubic-bezier(0.4,0,0.2,1);}
-body:not(.mode-home) #start-btn{opacity:0;transform:scale(1.25);}
-
-/* ===== Screen UI (home / level select) ===== */
-#back-game,#back-levels{
-position:absolute;
-top:1.05rem;left:1.2rem;
-z-index:60;
-width:2rem;height:2rem;
-padding:0;
-font-size:1.1rem;
-display:flex;
-align-items:center;justify-content:center;
-opacity:0;
-pointer-events:none;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
-}
-#back-game[hidden],#back-levels[hidden]{display:flex;}
-body.mode-game #back-game{
-opacity:1;pointer-events:auto;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;
-}
-body.mode-levels #back-levels{
-opacity:1;pointer-events:auto;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 3s,background 0.18s,color 0.18s;
-}
-body.mode-game #hud{padding-left:2rem;}
-
-#screen-home,#screen-levels{
-position:absolute;
-inset:0;
-display:flex;
-flex-direction:column;
-align-items:center;
-justify-content:center;
-gap:1.1rem;
-z-index:50;
-background:var(--bg);
-opacity:0;
-pointer-events:none;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
-}
-#screen-home.visible,#screen-levels.visible{
-opacity:1;
-pointer-events:auto;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 1.8s;
-}
-body.mode-game #screen-home,
-body.mode-game #screen-levels{
-opacity:0 !important;
-pointer-events:none !important;
-}
-body.mode-game #screen-levels{
-transition:opacity 0.5s cubic-bezier(0.4,0,0.2,1) !important;
-}
-body.mode-levels #screen-home{transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;}
-#screen-levels .overlay-title{opacity:0;transition:opacity 1s;}
-body.mode-levels #screen-levels .overlay-title{opacity:1;transition:opacity 1s 3s;}
-#screen-levels .page-arrow{opacity:0;}
-body.mode-levels #screen-levels .page-arrow{opacity:1;transition:opacity 0.25s;}
-body.mode-levels #screen-levels .page-arrow:disabled{opacity:0.18;transition:opacity 0.25s;}
-body.going-to-game #screen-levels .overlay-title,
-body.going-to-game #screen-levels .page-arrow,
-body.going-to-game #back-levels,
-body.going-to-game #level-grid .level-tile:not(.selected){
-opacity:0 !important;
-transition:opacity 0.5s !important;
-}
-body.mode-game #screen-levels .overlay-title,
-body.mode-game #screen-levels .page-arrow,
-body.mode-game #back-levels,
-body.mode-game #level-grid .level-tile:not(.selected){
-opacity:0 !important;
-transition:none !important;
-}
-body.going-to-game #level-grid .level-tile.selected{
-opacity:0 !important;
-transition:opacity 0.5s 0.75s !important;
-}
-body.mode-game #level-grid .level-tile.selected{
-opacity:0 !important;
-transition:none !important;
-}
-body.mode-game #screen-home *,
-body.mode-game #screen-levels *,
-body.mode-game #back-levels{
-pointer-events:none !important;
-}
-#hud,#goal-wrap,#debug-wrap{
-opacity:0;
-pointer-events:none;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1);
-}
-body.mode-home #hud,body.mode-levels #hud,
-body.mode-home #goal-wrap,body.mode-levels #goal-wrap,
-body.mode-home #debug-wrap,body.mode-levels #debug-wrap{
-opacity:0;
-pointer-events:none;
-}
-body.mode-game #hud,body.mode-game #goal-wrap{
-opacity:1;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s;
-}
-
-#screen-home .overlay-sub,#screen-levels .overlay-sub{
-text-align:center;
-}
-#home-progress{
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:0.75rem;
-letter-spacing:0.08em;
-color:var(--muted);
-font-variant-numeric:tabular-nums;
-}
-
-.levels-row{
-display:flex;
-align-items:center;
-gap:0.7rem;
-}
-.page-arrow{
-border:none;
-background:transparent;
-color:var(--text);
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:1.8rem;
-line-height:1;
-cursor:pointer;
-display:inline-flex;align-items:center;justify-content:center;
-padding:0;
-flex-shrink:0;
-position:relative;
-transition:opacity 0.25s;
-}
-.page-arrow::after{
-position:absolute;inset:0;
-display:flex;align-items:center;justify-content:center;
-color:var(--text);
-opacity:0;
-transition:opacity 0.25s;
-pointer-events:none;
-}
-.page-arrow:hover::after{opacity:1;transition:opacity 0.25s;}
-.page-arrow.clicked::after{transition:opacity 1s;}
-#prev-page::after{content:'';}
-#next-page::after{content:'';}
-.page-arrow:disabled{cursor:default;pointer-events:none;opacity:0.18;}
-.page-arrow:disabled:hover::after{opacity:0;}
-.level-grid-wrap{
-width:min(480px, 86vw);
-}
-#level-grid{
-position:relative;
-display:grid;
-grid-template-columns:repeat(5,1fr);
-gap:0;
-padding:2px;
-background:
-  radial-gradient(circle at 0 0, var(--text) 1.3px, transparent 1.8px),
-  radial-gradient(circle at 100% 0, var(--text) 1.3px, transparent 1.8px),
-  radial-gradient(circle at 0 100%, var(--text) 1.3px, transparent 1.8px),
-  radial-gradient(circle at 100% 100%, var(--text) 1.3px, transparent 1.8px);
-background-size:20% 25%;
-background-origin:content-box;
-background-clip:border-box;
-}
-body.mode-game #level-grid {
-pointer-events: none !important;
-}
-#level-grid{touch-action:none;}
-.level-tile{
-aspect-ratio:1/1;
-width:100%;
-position:relative;
-touch-action:none;
-display:flex;
-align-items:center;
-justify-content:center;
-border:none;
-background:transparent;
-color:var(--text);
-cursor:pointer;
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:1rem;
-letter-spacing:0.08em;
-transition:background 0.18s,color 0.18s,opacity 0.18s,transform 0.55s cubic-bezier(0.4,0,0.2,1);
-border-radius:0;
-pointer-events:all;
-}
-.level-tile .tile-num{
-position:absolute;
-inset:0;
-display:flex;
-align-items:center;
-justify-content:center;
-font-size:2.6rem;
-font-weight:300;
-letter-spacing:0;
-color:var(--text);
-opacity:0.6;
-z-index:0;
-pointer-events:none;
-}
-.level-tile .tile-thumb{
-position:absolute;
-inset:6%;
-width:88%;
-height:88%;
-z-index:1;
-pointer-events:none;
-display:block;
-opacity:0.18;
-transition:opacity 0.22s;
-}
-.level-tile:hover .tile-thumb,
-.level-tile.selected .tile-thumb,
-.level-tile.completed .tile-thumb{
-opacity:1;
-}
-.level-tile.completed .tile-num{
-opacity:0.1;
-}
-body.page-swapping #level-grid,
-body.page-swapping #level-grid .level-tile,
-body.page-swapping .page-arrow,
-body.page-swap-cooldown #level-grid .level-tile{pointer-events:none !important;}
-.level-tile.entering-right,
-.level-tile.entering-left{animation:tile-enter-fade 0.35s cubic-bezier(0.4,0,0.2,1) backwards;pointer-events:none;}
-.level-tile.leaving-right,
-.level-tile.leaving-left{opacity:0;pointer-events:none;}
-@keyframes tile-enter-fade{from{opacity:0;}}
-.level-tile:hover,
-.level-tile.selected{
-color:var(--text);
-}
-#level-hover-rod{
-position:absolute;
-left:0;top:0;
-width:20%;height:25%;
-box-sizing:border-box;
-border:2.5px solid var(--text);
-pointer-events:none;
-opacity:0;
-transform:translate(0,0);
-transition:transform 0.18s cubic-bezier(0.4,0,0.2,1),opacity 0.18s;
-z-index:1;
-}
-#level-hover-rod.visible{opacity:1;}
-body.going-to-game #level-hover-rod{opacity:0 !important;transition:opacity 0.5s 0.75s !important;}
-body.going-to-game #level-grid{
-  opacity:0 !important;transition:opacity 0.5s 0.75s !important;
-  background-image:none !important;
-}
-body.mode-game #level-grid{opacity:0 !important;transition:none !important;}
-#level-grid{transition:opacity 0.25s;}
-body.mode-game #level-hover-rod{opacity:0 !important;transition:none !important;}
-.level-tile{z-index:2;}
-#page-indicator{
-position:relative;
-width:min(480px, 86vw);
-height:18px;
-margin-top:-0.2rem;
-opacity:0;
-transition:opacity 1s;
-pointer-events:none;
-touch-action:none;
-}
-body.mode-levels #page-indicator{opacity:1;transition:opacity 1s 3s;}
-body.mode-levels #page-indicator .page-rod{pointer-events:auto;}
-body.going-to-game #page-indicator{opacity:0 !important;transition:opacity 0.5s !important;pointer-events:none !important;}
-body.mode-game #page-indicator{opacity:0 !important;transition:none !important;pointer-events:none !important;}
-body.page-swapping #page-indicator,
-body.page-swap-cooldown #page-indicator{pointer-events:none !important;}
-#page-indicator .page-dot{
-position:absolute;
-top:50%;
-width:2.6px;height:2.6px;
-background:var(--text);
-border-radius:50%;
-transform:translate(-50%,-50%);
-z-index:2;
-pointer-events:none;
-}
-#page-indicator .page-rod{
-position:absolute;
-top:50%;
-height:2px;
-background:var(--text);
-transform:translateY(-50%);
-border-radius:1px;
-z-index:1;
-cursor:grab;
-transition:left 0.45s cubic-bezier(0.4,0,0.2,1),
-           width 0.45s cubic-bezier(0.4,0,0.2,1),
-           height 0.18s;
-}
-#page-indicator .page-rod::before{
-content:'';
-position:absolute;
-inset:-8px 0;
-}
-#page-indicator .page-rod:hover{height:3px;}
-#page-indicator .page-rod.dragging{
-cursor:grabbing;
-transition:height 0.18s;
-height:3px;
-}
-#page-indicator .rod-joint{
-position:absolute;
-top:50%;
-width:5px;height:5px;
-background:var(--text);
-border-radius:50%;
-transform:translate(-50%,-50%);
-pointer-events:none;
-}
-#page-indicator .rod-joint-l{left:0;}
-#page-indicator .rod-joint-r{left:100%;}
-#page-range{
-position:relative;
-width:min(480px, 86vw);
-height:1.4em;
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:0.72rem;
-letter-spacing:0.18em;
-color:var(--text);
-font-variant-numeric:tabular-nums;
-margin-top:-0.05rem;
-opacity:0;
-transition:opacity 1s;
-pointer-events:none;
-}
-#page-range .page-range-text{
-position:absolute;
-top:0;
-display:block;
-text-align:center;
-transition:opacity 0.22s;
-}
-body.mode-levels #page-range{opacity:0.55;transition:opacity 1s 3s;}
-body.going-to-game #page-range{opacity:0 !important;transition:opacity 0.5s !important;}
-body.mode-game #page-range{opacity:0 !important;transition:none !important;}
-/* === Settings Button & Panel === */
-#settings-btn{
-position:absolute;
-bottom:1.4rem;right:1.8rem;
-width:2rem;height:2rem;
-border:1.5px solid var(--text);
-background:transparent;
-color:var(--text);
-font-size:1.15rem;
-cursor:pointer;
-display:flex;
-align-items:center;justify-content:center;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
-padding:0;
-opacity:0;
-pointer-events:none;
-}
-body.mode-home #settings-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
-#settings-btn:hover{background:var(--text);color:var(--bg);}
-#settings-panel{
-position:absolute;
-bottom:3.8rem;right:1.8rem;
-background:rgba(245,245,240,0.96);
-border:1px solid var(--border);
-backdrop-filter:blur(5px);
-padding:0.7rem 0.9rem;
-display:flex;
-flex-direction:column;
-gap:0.5rem;
-white-space:nowrap;
-opacity:0;visibility:hidden;pointer-events:none;
-transform:translateY(4px);
-transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
-           transform 0.22s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s linear 0.22s;
-}
-#settings-panel.visible{
-opacity:1;visibility:visible;pointer-events:auto;
-transform:translateY(0);
-transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
-           transform 0.22s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s;
-}
-body.mode-game #debug-wrap{display:none;}
-body.mode-game #debug-wrap.visible{display:flex;}
-/* === Game-mode left-rail buttons (reset / undo / reset-view) === */
-#reset-btn,#undo-btn,#reset-view-btn{
-position:absolute;
-left:1.2rem;
-width:2rem;height:2rem;
-border:1.5px solid var(--text);background:transparent;
-color:var(--text);
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:1.1rem;letter-spacing:0;cursor:pointer;
-display:flex;
-align-items:center;justify-content:center;
-z-index:30;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
-padding:0;
-opacity:0;
-pointer-events:none;
-}
-#reset-btn      {top:3.6rem;}
-#undo-btn       {top:6.0rem;font-size:1.05rem;}
-#reset-view-btn {top:8.4rem;font-size:1rem;}
-#reset-btn:hover,#undo-btn:hover,#reset-view-btn:hover{background:var(--text);color:var(--bg);}
-body.mode-game #undo-btn:disabled{opacity:0.35;cursor:default;}
-body.mode-game #undo-btn:disabled:hover{background:transparent;color:var(--text);}
-body.mode-game #reset-btn,
-body.mode-game #undo-btn,
-body.mode-game #reset-view-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
-/* === Help Button & Popup === */
-#help-btn{
-position:absolute;
-top:1.05rem;right:1.8rem;
-width:2rem;height:2rem;
-border:1.5px solid var(--text);
-background:transparent;
-color:var(--text);
-font-family:'Inter','Taipei Sans TC Beta',system-ui,sans-serif;
-font-size:1rem;letter-spacing:0;
-cursor:pointer;
-display:flex;
-align-items:center;justify-content:center;
-z-index:30;
-transition:opacity 1s cubic-bezier(0.4,0,0.2,1),background 0.18s,color 0.18s;
-padding:0;
-opacity:0;
-pointer-events:none;
-}
-#help-btn:hover{background:var(--text);color:var(--bg);}
-body.mode-game #help-btn{opacity:1;pointer-events:auto;transition:opacity 1s cubic-bezier(0.4,0,0.2,1) 0.5s,background 0.18s,color 0.18s;}
-#help-popup{
-position:absolute;
-top:3.4rem;right:1.8rem;
-background:rgba(245,245,240,0.96);
-border:1px solid var(--border);
-backdrop-filter:blur(5px);
-padding:0.85rem 1.1rem;
-font-size:0.76rem;
-line-height:1.85;
-color:var(--text);
-letter-spacing:0.03em;
-z-index:29;
-display:block;
-white-space:nowrap;
-opacity:0;visibility:hidden;pointer-events:none;
-transform:translateY(-4px);
-transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
-           transform 0.22s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s linear 0.22s;
-}
-#help-popup.visible{
-opacity:1;visibility:visible;pointer-events:auto;
-transform:translateY(0);
-transition:opacity 0.22s cubic-bezier(0.4,0,0.2,1),
-           transform 0.22s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s;
-}
-body:not(.mode-game) #help-popup{
-opacity:0 !important;visibility:hidden !important;pointer-events:none !important;
-}
-/* === Settings panel rows === */
-.settings-row{width:100%;text-align:center;padding:0.42rem 0.85rem;font-size:0.78rem;letter-spacing:0.08em;}
-.audio-row{display:flex;justify-content:center;gap:1.4rem;padding:0.5rem 0.85rem;}
-.lang-opt{opacity:0.38;}
-.lang-opt.lang-active{opacity:1;}
-.icon-btn{background:none;border:none;color:var(--text);cursor:pointer;padding:0.25rem;display:inline-flex;align-items:center;justify-content:center;opacity:0.78;transition:opacity 0.15s;}
-.icon-btn:hover{opacity:1;}
-.icon-btn svg{display:block;}
-/* === Confirm modal === */
-#confirm-modal,#credits-modal{
-position:absolute;inset:0;
-display:flex;align-items:center;justify-content:center;
-z-index:80;
-background:rgba(245,245,240,0.80);
-backdrop-filter:blur(4px);
-opacity:0;visibility:hidden;pointer-events:none;
-transition:opacity 0.3s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s linear 0.3s;
-}
-#confirm-modal.visible,#credits-modal.visible{
-opacity:1;visibility:visible;pointer-events:auto;
-transition:opacity 0.3s cubic-bezier(0.4,0,0.2,1),
-           visibility 0s;
-}
-#confirm-box,#credits-box{
-transform:scale(0.96);
-transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
-}
-#confirm-modal.visible #confirm-box,
-#credits-modal.visible #credits-box{
-transform:scale(1);
-}
-#confirm-box,#credits-box{
-background:var(--bg);
-border:1px solid var(--border);
-padding:1.7rem 2.2rem;
-display:flex;flex-direction:column;
-align-items:center;gap:0.9rem;
-min-width:260px;
-}
-#confirm-title,#credits-title{font-size:1.05rem;letter-spacing:0.06em;}
-#confirm-body{font-size:0.78rem;color:var(--muted);letter-spacing:0.04em;text-align:center;}
-#confirm-actions{display:flex;gap:0.8rem;margin-top:0.2rem;}
-.credits-line{font-size:0.82rem;letter-spacing:0.04em;color:var(--text);}
-.credits-muted{font-size:0.78rem;color:var(--muted);}
-#credits-footer{margin-top:0.4rem;}
-
-/* === Mobile / small-screen layout === */
-@media (max-width: 600px), (pointer: coarse) {
-  #hud{padding:1rem 1rem;}
-  .overlay-title{font-size:1.8rem;}
-  #back-game,#back-levels{top:0.7rem;left:0.7rem;}
-  #help-btn{top:0.7rem;right:0.9rem;}
-  #reset-btn      {top:3.6rem;left:0.7rem;}
-  #undo-btn       {top:6.5rem;left:0.7rem;}
-  #reset-view-btn {top:9.4rem;left:0.7rem;}
-  #settings-btn{bottom:1rem;right:0.9rem;}
-  #settings-panel{bottom:3.2rem;right:0.9rem;}
-  #help-popup{
-    top:3rem;right:0.9rem;
-    font-size:0.72rem;line-height:1.7;
-    padding:0.7rem 0.9rem;
-  }
-  #goal-wrap{top:2.8rem;}
-  #goal-canvas{width:120px;height:120px;}
-  #debug-wrap{bottom:1rem;left:0.7rem;padding:0.5rem;}
-  .level-grid-wrap{width:min(360px, 82vw);}
-  #page-indicator{width:min(360px, 82vw);}
-  #page-range{width:min(360px, 82vw);}
-  .levels-row{gap:0.3rem;}
-  .page-arrow{font-size:1.5rem;width:2rem;height:2rem;}
-  .level-tile{font-size:0.95rem;}
-  #start-btn{font-size:2.8rem;}
-  .btn{padding:0.6rem 1.6rem;}
-  /* Bigger tap targets for icon buttons — keep all 4 left-rail buttons identical */
-  #back-game,#back-levels,#reset-btn,#undo-btn,#reset-view-btn,#help-btn,#settings-btn{
-    width:2.4rem;height:2.4rem;font-size:1.1rem;
-  }
-}
-/* Block interaction with buttons while interface is animating between modes. */
-body.mode-transitioning button,
-body.mode-transitioning .level-tile,
-body.mode-transitioning .page-arrow,
-body.mode-transitioning #goal-canvas{
-pointer-events:none !important;
-}
-@media (max-height: 560px) {
-  #goal-wrap{top:2.6rem;}
-  #goal-canvas{width:108px;height:108px;}
-  #reset-btn      {top:3.4rem;}
-  #undo-btn       {top:6.1rem;}
-  #reset-view-btn {top:8.8rem;}
-}
-</style>
+<link rel="stylesheet" href="./style.css">
 </head>
 <body class="loading">
 <div id="app-loader" aria-label="Loading"></div>
@@ -798,12 +60,16 @@ pointer-events:none !important;
 
   <button class="btn settings-row" id="lang-btn">中文</button>
   <button class="btn settings-row" id="credits-btn">Credits</button>
+  <button class="btn settings-row" id="export-progress-btn">Export Save</button>
+  <button class="btn settings-row" id="import-progress-btn">Import Save</button>
+  <input type="file" id="import-file-input" accept=".json" style="display:none">
   <button class="btn settings-row" id="reset-progress-btn">Reset Progress</button>
 </div>
 </div>
 
 <div id="screen-levels" class="screen">
 <div class="overlay-title">Silhouette</div>
+<div id="levels-progress"></div>
 <div class="levels-row">
 <button class="page-arrow" id="prev-page" aria-label="Previous"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none" aria-hidden="true" style="display:block"><path d="M16 4 L6 12 L16 20 Z"/></svg></button>
 <div class="level-grid-wrap">
@@ -819,6 +85,7 @@ pointer-events:none !important;
 <div id="level-block">
 <div id="level-tag"><span id="level-prefix">Level </span><span id="lvl-num">1</span><span id="level-suffix"></span></div>
 </div>
+<div id="game-timer">0:00</div>
 </div>
 
 <div id="goal-wrap">
@@ -901,6 +168,8 @@ pointer-events:none !important;
     zh: {
       start:        ICO_PLAY,
       resetProgress:'重置進度',
+      exportProgress:'匯出存檔',
+      importProgress:'匯入存檔',
       langBtn:      '<span class="lang-opt">英</span>/<span class="lang-opt lang-active">中</span>',
       credits:      '關於',
       confirmTitle: '確認重置？',
@@ -923,6 +192,8 @@ pointer-events:none !important;
     en: {
       start:        ICO_PLAY,
       resetProgress:'Reset Progress',
+      exportProgress:'Export Save',
+      importProgress:'Import Save',
       langBtn:      '<span class="lang-opt lang-active">EN</span>/<span class="lang-opt">ZT</span>',
       credits:      'Credits',
       confirmTitle: 'Confirm Reset?',
@@ -953,6 +224,8 @@ pointer-events:none !important;
     var s = S[lang];
     setText('start-btn',         s.start);
     setText('reset-progress-btn',s.resetProgress);
+    setText('export-progress-btn',s.exportProgress);
+    setText('import-progress-btn',s.importProgress);
     setText('lang-btn',          s.langBtn);
     setText('music-btn',         musicMuted ? ICONS.noteOff    : ICONS.noteOn);
     setText('sfx-btn',           sfxMuted   ? ICONS.speakerOff : ICONS.speakerOn);
@@ -1051,6 +324,47 @@ pointer-events:none !important;
     e.stopPropagation();
   });
 
+  // ── Export progress ──
+  document.getElementById('export-progress-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    settingsPanel.classList.remove('visible');
+    try {
+      var raw = localStorage.getItem('silhouette-progress') || '{}';
+      var blob = new Blob([raw], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'silhouette-save.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch(err) { console.error('Export failed', err); }
+  });
+
+  // ── Import progress ──
+  var importInput = document.getElementById('import-file-input');
+  document.getElementById('import-progress-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    settingsPanel.classList.remove('visible');
+    importInput.value = '';
+    importInput.click();
+  });
+  importInput.addEventListener('change', function() {
+    var file = importInput.files && importInput.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data.completed)) throw new Error('bad format');
+        localStorage.setItem('silhouette-progress', JSON.stringify(data));
+        document.dispatchEvent(new CustomEvent('silhouette:importprogress', { detail: data }));
+      } catch(err) { console.error('Import failed', err); }
+    };
+    reader.readAsText(file);
+  });
+
   // ── Language toggle ──
   document.getElementById('lang-btn').addEventListener('click', function(e) {
     e.stopPropagation();
@@ -1091,6 +405,127 @@ pointer-events:none !important;
   });
 
   updateLang();
+
+  // ── Goal-wrap: draggable with 8-position magnetic snap ──────────────────
+  (function(){
+    var GOAL_POS_KEY = 'silhouette-goal-pos';
+    var goalWrap = document.getElementById('goal-wrap');
+    if (!goalWrap) return;
+
+    function getGoalSize() {
+      var c = document.getElementById('goal-canvas');
+      return { w: (c && c.offsetWidth) || 150, h: (c && c.offsetHeight) || 168 };
+    }
+
+    function computeSnaps(gw, gh) {
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      var tY = Math.round(3.6  * rem);
+      var lX = Math.round(5.5  * rem);
+      var rX = vw - gw - Math.round(5.5 * rem);
+      var cX = Math.round((vw - gw) / 2);
+      var mY = Math.round((vh - gh) / 2);
+      var bY = vh - gh - Math.round(1.4 * rem);
+      return [
+        {id:'TL',x:lX,y:tY},{id:'TC',x:cX,y:tY},{id:'TR',x:rX,y:tY},
+        {id:'ML',x:lX,y:mY},                      {id:'MR',x:rX,y:mY},
+        {id:'BL',x:lX,y:bY},{id:'BC',x:cX,y:bY},{id:'BR',x:rX,y:bY},
+      ];
+    }
+
+    function nearestSnap(cx, cy) {
+      var size = getGoalSize();
+      var snaps = computeSnaps(size.w, size.h);
+      var best = snaps[0], bestD = Infinity;
+      snaps.forEach(function(s){
+        var d = (cx-s.x)*(cx-s.x) + (cy-s.y)*(cy-s.y);
+        if (d < bestD){ bestD=d; best=s; }
+      });
+      return best;
+    }
+
+    function snapTo(s, animate) {
+      try { localStorage.setItem(GOAL_POS_KEY, s.id); } catch(e) {}
+      if (animate) {
+        goalWrap.classList.add('snapping');
+        goalWrap.getBoundingClientRect(); // force reflow so transition is active before position changes
+        goalWrap.addEventListener('transitionend', function h(){
+          goalWrap.classList.remove('snapping');
+          goalWrap.removeEventListener('transitionend', h);
+        });
+      }
+      goalWrap.style.left = s.x + 'px';
+      goalWrap.style.top  = s.y + 'px';
+    }
+
+    function restorePosition() {
+      var savedId; try { savedId = localStorage.getItem(GOAL_POS_KEY); } catch(e) {}
+      var size = getGoalSize();
+      var snaps = computeSnaps(size.w, size.h);
+      var t = snaps.find(function(s){ return s.id === savedId; }) || snaps[1]; // default TC
+      goalWrap.style.left = t.x + 'px';
+      goalWrap.style.top  = t.y + 'px';
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', restorePosition);
+    } else {
+      restorePosition();
+    }
+    window.addEventListener('resize', restorePosition);
+
+    var ds = null;
+    var THRESH = 5;
+
+    goalWrap.addEventListener('pointerdown', function(e) {
+      if (e.button !== undefined && e.button > 0) return;
+      ds = {
+        id: e.pointerId,
+        sx: e.clientX, sy: e.clientY,
+        ox: parseFloat(goalWrap.style.left) || 0,
+        oy: parseFloat(goalWrap.style.top)  || 0,
+        moved: false,
+      };
+    });
+
+    goalWrap.addEventListener('pointermove', function(e) {
+      if (!ds || e.pointerId !== ds.id) return;
+      var dx = e.clientX - ds.sx, dy = e.clientY - ds.sy;
+      if (!ds.moved) {
+        if (dx*dx + dy*dy < THRESH*THRESH) return;
+        ds.moved = true;
+        goalWrap.classList.add('dragging');
+        try { goalWrap.setPointerCapture(e.pointerId); } catch(_) {}
+        var gc = document.getElementById('goal-canvas');
+        if (gc) gc.classList.remove('zoomed');
+      }
+      var size = getGoalSize();
+      var nx = Math.max(0, Math.min(window.innerWidth  - size.w, ds.ox + dx));
+      var ny = Math.max(0, Math.min(window.innerHeight - size.h, ds.oy + dy));
+      goalWrap.style.left = nx + 'px';
+      goalWrap.style.top  = ny + 'px';
+      e.preventDefault();
+    });
+
+    function endDrag(e) {
+      if (!ds || e.pointerId !== ds.id) return;
+      var moved = ds.moved;
+      goalWrap.classList.remove('dragging');
+      ds = null;
+      if (moved) {
+        var cx = parseFloat(goalWrap.style.left) || 0;
+        var cy = parseFloat(goalWrap.style.top)  || 0;
+        snapTo(nearestSnap(cx, cy), true);
+      }
+    }
+    goalWrap.addEventListener('pointerup',     endDrag);
+    goalWrap.addEventListener('pointercancel', function(e) {
+      if (ds && e.pointerId === ds.id) {
+        goalWrap.classList.remove('dragging');
+        ds = null;
+      }
+    });
+  })();
 
   // ── Block button interaction during mode-transition animations ──
   // When body's mode-* class changes (home / levels / game), the UI plays

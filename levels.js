@@ -13,7 +13,10 @@
 //   • Oblique: precomputed by projectAt(theta, phi, ...)
 // =============================================================================
 
+export const LEVEL_FORMAT_VERSION = 2;
+
 const L = (name, grid, rods, goalPaths) => ({
+  version: LEVEL_FORMAT_VERSION,
   name, grid,
   rods: rods.map((p, i) => ({ id: i, path: p })),
   goalPaths,

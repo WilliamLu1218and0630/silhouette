@@ -1,4 +1,8 @@
-import { LEVELS, scrambleLevel } from './levels.js';
+import { LEVELS, scrambleLevel, LEVEL_FORMAT_VERSION } from './levels.js';
+import {
+  GEO_EPSILON, GEO_SAMPLE_STEP, GEO_MIN_SEGMENT_COVERAGE, GEO_MIN_SAMPLES_PER_SEG,
+  centerShape, distPointToShape, sampleSegment, measureGeometricMatch,
+} from './geometry.js';
 import { drawGoalPreview } from './goalPreview.js';
 
 // ── Editor test-level injection ──────────────────────────────────────────────
@@ -29,10 +33,12 @@ export function initGame() {
   const CAM_PHI_MIN       = -Math.PI / 2 + 0.01;        // elevation lower clamp
 
   // ── Rod geometry ────────────────────────────────────────────────────────────
+  const _coarsePointer = (typeof matchMedia === 'function')
+    ? matchMedia('(pointer: coarse)').matches : false;
   const CELL  = 0.5;       // world units per grid cell
   const ROD_R = 0.010;     // rod cylinder radius
   const ROD_Y = ROD_R / 2; // Y offset so rods sit flush above y = 0
-  const HIT_R = 0.32;      // invisible hit-detection cylinder radius (larger than visual)
+  const HIT_R = _coarsePointer ? 0.48 : 0.32; // larger hit zone on touch devices
 
   // ── Rod colours ─────────────────────────────────────────────────────────────
   const COL_IDLE  = new THREE.Color(0x1a1a2e); // default rod colour
@@ -40,20 +46,10 @@ export function initGame() {
   const COL_CLEAR = new THREE.Color(0xf2c14e); // level-clear gold
 
   // ── Victory detection (geometric segment coverage) ─────────────────────────
+  // Constants and pure matching functions imported from geometry.js.
   // Compares projected rod segments to goal segments directly, in world units,
   // after translating each shape's bbox-center to the origin (no rescale: scale
   // matches naturally because goal coords get multiplied by CELL).
-  const GEO_EPSILON              = 0.12;  // matching tolerance, world units (~0.24 grid cell)
-  const GEO_SAMPLE_STEP          = 0.05;  // segment sampling step ≤ ε/2
-  // Per-segment coverage instead of a global average: a single misplaced segment
-  // can no longer be hidden by the others' near-perfect coverage. A complex goal
-  // with one wrong stroke would previously still average ≥ 0.97.
-  const GEO_MIN_SEGMENT_COVERAGE = 0.95;  // every goal/rod segment must reach this individually
-  // Floor on samples per segment so the 0.95 ratio threshold has the same effective
-  // granularity for short and long segments. Without this, a 1-cell segment at step
-  // 0.05 only has 11 samples (1 miss = 0.91 cov, fails), while a 4-cell segment has
-  // 41 (2 misses = 0.95, passes) — different effective stringency by length.
-  const GEO_MIN_SAMPLES_PER_SEG  = 21;
 
   // ── View assist (post-clear) ────────────────────────────────────────────────
   // Once victory is confirmed, climb the match-score landscape (goalCoverage +
@@ -72,8 +68,6 @@ export function initGame() {
   // when the user means to rotate the camera.
   const DRAG_THRESH_MOUSE = 5;
   const DRAG_THRESH_TOUCH = 9;
-  const _coarsePointer = (typeof matchMedia === 'function')
-    ? matchMedia('(pointer: coarse)').matches : false;
   let DRAG_THRESH = _coarsePointer ? DRAG_THRESH_TOUCH : DRAG_THRESH_MOUSE;
   const VICTORY_IMMUNE_MS = 1200; // grace period (ms) after level load before victory check
   // Magnetic-snap drag tuning (see magnetize()): values are in fractions of one cell.
@@ -201,6 +195,32 @@ export function initGame() {
   let currentLevel    = 0;
   let levelPage       = 0;
   let cleared = false;
+
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  let timerStart   = null;
+  let timerStopped = false;
+  let timerRAF     = null;
+
+  function timerTick() {
+    const el = document.getElementById('game-timer');
+    if (el && timerStart !== null) {
+      const s = timerStopped
+        ? Math.round((timerStopped - timerStart) / 1000)
+        : Math.round((performance.now() - timerStart) / 1000);
+      el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+    timerRAF = requestAnimationFrame(timerTick);
+  }
+
+  function startTimer() {
+    timerStart   = performance.now();
+    timerStopped = false;
+    if (!timerRAF) timerRAF = requestAnimationFrame(timerTick);
+  }
+
+  function stopTimer() {
+    if (timerStart !== null && !timerStopped) timerStopped = performance.now();
+  }
   // Undo history: each entry is a snapshot of all rod paths at a prior committed state.
   // Only filled by completed drags (not mid-drag), and cleared on level (re)load.
   let undoStack = [];
@@ -511,6 +531,10 @@ export function initGame() {
   let activeScramble = null;  // { idx, seed }
 
   function loadLevel(idx, opts = {}) {
+    const lvlCheck = LEVELS[idx];
+    if (lvlCheck && lvlCheck.version > LEVEL_FORMAT_VERSION) {
+      console.warn(`Level ${idx} format v${lvlCheck.version} > engine v${LEVEL_FORMAT_VERSION}`);
+    }
     clearScene();
     undoStack = [];
     updateUndoBtn();
@@ -547,111 +571,13 @@ export function initGame() {
 
     victoryImmune = true;
     setTimeout(() => { victoryImmune = false; }, VICTORY_IMMUNE_MS);
+    startTimer();
   }
 
   // Project a world position onto the camera's view plane.
   // Uses dot products with camera right/up vectors to avoid NDC aspect-ratio distortion.
   function projectToView(worldPos) {
     return [worldPos.dot(_camRight), worldPos.dot(camUp)];
-  }
-
-  // Translate a shape so its bbox-center sits at the origin. Scale is preserved
-  // (no normalization to [0,1]) — for the rod projection that's already world
-  // units, and for the goal we multiply by CELL upstream.
-  function centerShape(segments, extraPoints) {
-    if (!segments || !segments.length) return null;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [s, e] of segments) {
-      for (const p of [s, e]) {
-        if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
-        if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
-      }
-    }
-    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    const shift = ([x, y]) => [x - cx, y - cy];
-    return {
-      segments: segments.map(([s, e]) => [shift(s), shift(e)]),
-      points:   extraPoints ? extraPoints.map(shift) : [],
-    };
-  }
-
-  function distPointToSegment(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const len2 = dx * dx + dy * dy;
-    let t = len2 > 0 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    const qx = x1 + t * dx, qy = y1 + t * dy;
-    return Math.hypot(px - qx, py - qy);
-  }
-
-  function distPointToShape(px, py, segs) {
-    let best = Infinity;
-    for (const [s, e] of segs) {
-      const d = distPointToSegment(px, py, s[0], s[1], e[0], e[1]);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-
-  // Sample a segment at intervals ≤ step (always includes both endpoints).
-  // Pass minN > 2 to enforce a minimum sample count regardless of length, so
-  // the per-segment coverage ratio resolves to the same effective stringency
-  // for short and long segments.
-  function sampleSegment(s, e, step, minN = 2) {
-    const len = Math.hypot(e[0] - s[0], e[1] - s[1]);
-    const n = Math.max(minN, Math.ceil(len / step) + 1);
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-      const t = i / (n - 1);
-      out[i] = [s[0] + t * (e[0] - s[0]), s[1] + t * (e[1] - s[1])];
-    }
-    return out;
-  }
-
-  function measureGeometricMatch(rodShape, goalShape) {
-    if (!rodShape || !goalShape) {
-      return { matched: false, rodCoverage: 0, goalCoverage: 0 };
-    }
-    const rodSegs  = rodShape.segments;
-    const goalSegs = goalShape.segments;
-    if (rodSegs.length === 0 || goalSegs.length === 0) {
-      return { matched: false, rodCoverage: 0, goalCoverage: 0 };
-    }
-
-    // Min per-segment coverage (not a global average): one misplaced stroke in
-    // a complex goal would otherwise be diluted by the well-aligned rest.
-    // No vertex/junction check — a level can have multiple valid solutions whose
-    // rod-corner positions don't line up with the goal's segment subdivisions.
-    let minGoalSegCov = 1;
-    for (const [s, e] of goalSegs) {
-      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP, GEO_MIN_SAMPLES_PER_SEG);
-      let covered = 0;
-      for (const [px, py] of pts) {
-        if (distPointToShape(px, py, rodSegs) <= GEO_EPSILON) covered++;
-      }
-      const cov = covered / pts.length;
-      if (cov < minGoalSegCov) minGoalSegCov = cov;
-    }
-
-    let minRodSegCov = 1;
-    for (const [s, e] of rodSegs) {
-      const pts = sampleSegment(s, e, GEO_SAMPLE_STEP, GEO_MIN_SAMPLES_PER_SEG);
-      let covered = 0;
-      for (const [px, py] of pts) {
-        if (distPointToShape(px, py, goalSegs) <= GEO_EPSILON) covered++;
-      }
-      const cov = covered / pts.length;
-      if (cov < minRodSegCov) minRodSegCov = cov;
-    }
-
-    const matched = minGoalSegCov >= GEO_MIN_SEGMENT_COVERAGE
-                 && minRodSegCov  >= GEO_MIN_SEGMENT_COVERAGE;
-
-    return {
-      matched,
-      goalCoverage: minGoalSegCov,
-      rodCoverage:  minRodSegCov,
-    };
   }
 
   function drawShapeOverlay(canvas, primary, ghost) {
@@ -984,6 +910,7 @@ export function initGame() {
   }
 
   function triggerClear() {
+    stopTimer();
     completedLevels.add(currentLevel);
     saveProgress();
     // Lock all input for the entire clear sequence (camera glide → gold pulse
@@ -1361,6 +1288,8 @@ export function initGame() {
     if (nextBtn) nextBtn.disabled = end >= LEVELS.length;
     updateActiveTile();
     updatePageIndicator();
+    const progEl = document.getElementById('levels-progress');
+    if (progEl) progEl.textContent = `${completedLevels.size} / ${LEVELS.length}`;
   }
 
   function updatePageIndicator() {
@@ -2024,6 +1953,7 @@ export function initGame() {
     updateUndoBtn();
     const _almost = document.getElementById('almost-hint');
     if (_almost) _almost.classList.remove('visible');
+    startTimer();
     // Reuse the immunity window so the easing-back can't accidentally trigger victory.
     victoryImmune = true;
     setTimeout(() => { victoryImmune = false; }, RESET_DURATION_S * 1000 + 200);
@@ -2094,6 +2024,15 @@ export function initGame() {
     completedLevels.clear();
     currentLevel = 0;
     saveProgress();
+    buildLevelTiles();
+  });
+
+  document.addEventListener('silhouette:importprogress', (e) => {
+    const data = e.detail;
+    completedLevels.clear();
+    if (Array.isArray(data.completed)) data.completed.forEach(i => completedLevels.add(i));
+    if (typeof data.current === 'number') currentLevel = Math.min(data.current, LEVELS.length - 1);
+    updateHomeProgress();
     buildLevelTiles();
   });
 
