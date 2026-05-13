@@ -1,4 +1,4 @@
-import { LEVELS, scrambleLevel, LEVEL_FORMAT_VERSION, isLevelLocked } from './levels.js';
+import { LEVELS, scrambleLevel, LEVEL_FORMAT_VERSION, isLevelLocked, getVisibleLevelIndices } from './levels.js';
 import {
   GEO_EPSILON, GEO_SAMPLE_STEP, GEO_MIN_SEGMENT_COVERAGE, GEO_MIN_SAMPLES_PER_SEG,
   centerShape, distPointToShape, sampleSegment, measureGeometricMatch,
@@ -258,7 +258,8 @@ export function initGame() {
   function updateHomeProgress() {
     const el = document.getElementById('home-progress');
     if (!el) return;
-    el.textContent = `${completedLevels.size} / ${LEVELS.length}`;
+    const visibleCount = getVisibleLevelIndices(LEVELS, completedLevels).length;
+    el.textContent = `${completedLevels.size} / ${visibleCount}`;
   }
 
   function saveProgress() {
@@ -1221,11 +1222,13 @@ export function initGame() {
       hoverRod.style.height = (tileRect.height + bw) + 'px';
       hoverRod.classList.add('visible');
     };
+    const visible = getVisibleLevelIndices(LEVELS, completedLevels);
     const start = levelPage * 10;
-    const end   = Math.min(start + 10, LEVELS.length);
+    const end   = Math.min(start + 10, visible.length);
     const rowsThisPage = Math.max(1, Math.ceil((end - start) / 5));
     grid.style.backgroundSize = `20% ${100 / rowsThisPage}%`;
-    for (let idx = start; idx < end; idx++) {
+    for (let i = start; i < end; i++) {
+      const idx = visible[i];
       const tile = document.createElement('button');
       const locked = isLevelLocked(LEVELS[idx]);
       tile.className     = 'level-tile'
@@ -1265,7 +1268,7 @@ export function initGame() {
     // resolves to the real pixel size for HiDPI sampling in drawGoalPreview.
     const thumbs = grid.querySelectorAll('.level-tile .tile-thumb');
     thumbs.forEach((thumb, i) => {
-      const lvl = LEVELS[start + i];
+      const lvl = LEVELS[visible[start + i]];
       if (lvl) drawGoalPreview(thumb, lvl.goalPaths, { transparent: true });
     });
     if (!grid.dataset.hoverBound) {
@@ -1295,17 +1298,18 @@ export function initGame() {
     const prevBtn = document.getElementById('prev-page');
     const nextBtn = document.getElementById('next-page');
     if (prevBtn) prevBtn.disabled = levelPage === 0;
-    if (nextBtn) nextBtn.disabled = end >= LEVELS.length;
+    if (nextBtn) nextBtn.disabled = end >= visible.length;
     updateActiveTile();
     updatePageIndicator();
     const progEl = document.getElementById('levels-progress');
-    if (progEl) progEl.textContent = `${completedLevels.size} / ${LEVELS.length}`;
+    if (progEl) progEl.textContent = `${completedLevels.size} / ${visible.length}`;
   }
 
   function updatePageIndicator() {
     const wrap = document.getElementById('page-indicator');
     if (!wrap) return;
-    const totalPages = Math.max(1, Math.ceil(LEVELS.length / 10));
+    const visibleCount = getVisibleLevelIndices(LEVELS, completedLevels).length;
+    const totalPages = Math.max(1, Math.ceil(visibleCount / 10));
     const existingDots = wrap.querySelectorAll('.page-dot');
     if (existingDots.length !== totalPages + 1) {
       existingDots.forEach(d => d.remove());
@@ -1340,7 +1344,7 @@ export function initGame() {
       }
       const safePage = Math.min(Math.max(0, levelPage), totalPages - 1);
       const startLvl = safePage * 10 + 1;
-      const endLvl = Math.min(safePage * 10 + 10, LEVELS.length);
+      const endLvl = Math.min(safePage * 10 + 10, visibleCount);
       const newText = `${startLvl}~${endLvl}`;
       const newLeft = (safePage / totalPages) * 100;
       const newWidth = (1 / totalPages) * 100;
@@ -1393,7 +1397,7 @@ export function initGame() {
       try { rod.setPointerCapture(e.pointerId); } catch(_) {}
       rod.classList.add('dragging');
       const rect = wrap.getBoundingClientRect();
-      const totalPages = Math.max(1, Math.ceil(LEVELS.length / 10));
+      const totalPages = Math.max(1, Math.ceil(getVisibleLevelIndices(LEVELS, completedLevels).length / 10));
       const segWidth = 1 / totalPages;
       dragState = {
         pointerId: e.pointerId,
@@ -1926,7 +1930,7 @@ export function initGame() {
   });
   document.getElementById('next-page').addEventListener('click', () => {
     if (pageSwapAnimating) return;
-    if ((levelPage + 1) * 10 < LEVELS.length) animatePageSwap(levelPage + 1, 'right');
+    if ((levelPage + 1) * 10 < getVisibleLevelIndices(LEVELS, completedLevels).length) animatePageSwap(levelPage + 1, 'right');
   });
 
   // Soft reset: keep meshes, animate rod paths back to their level-start state and
