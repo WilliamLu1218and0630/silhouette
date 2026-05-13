@@ -15,9 +15,43 @@
 
 export const LEVEL_FORMAT_VERSION = 2;
 
-const L = (name, grid, rods, goalPaths) => ({
+// ── Content packs ───────────────────────────────────────────────────────────
+// Levels belong to a pack. The current build ships only the FREE pack; the
+// PREMIUM pack is reserved for the future paid release. Levels without an
+// explicit `pack` field default to FREE for backward compatibility.
+export const PACKS = Object.freeze({
+  FREE:    'free',
+  PREMIUM: 'premium',
+});
+
+export function getLevelPack(level) {
+  return (level && level.pack) || PACKS.FREE;
+}
+
+// Entitlements — which packs the current user has unlocked. In a future
+// build this set is hydrated from a verified IAP receipt (Apple/Google) or
+// a license check on the desktop build. Until then, only FREE is granted.
+const OWNED_PACKS = new Set([PACKS.FREE]);
+const OWNED_KEY   = 'silhouette-owned-packs';
+try {
+  const raw = localStorage.getItem(OWNED_KEY);
+  if (raw) for (const p of JSON.parse(raw)) OWNED_PACKS.add(p);
+} catch {}
+
+export function ownsPack(pack) {
+  return OWNED_PACKS.has(pack);
+}
+export function grantPack(pack) {
+  OWNED_PACKS.add(pack);
+  try { localStorage.setItem(OWNED_KEY, JSON.stringify([...OWNED_PACKS])); } catch {}
+}
+export function isLevelLocked(level) {
+  return !ownsPack(getLevelPack(level));
+}
+
+const L = (name, grid, rods, goalPaths, pack = PACKS.FREE) => ({
   version: LEVEL_FORMAT_VERSION,
-  name, grid,
+  name, grid, pack,
   rods: rods.map((p, i) => ({ id: i, path: p })),
   goalPaths,
 });

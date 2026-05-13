@@ -1,1 +1,7 @@
 ﻿.claude/
+
+# Private — kept outside this public demo repo (see F:\silhouette-private)
+# Listed here so they cannot be accidentally re-committed if copied back
+# locally for editing.
+solver/
+level-editor.html

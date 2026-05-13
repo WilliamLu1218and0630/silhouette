@@ -1,4 +1,4 @@
-import { LEVELS, scrambleLevel, LEVEL_FORMAT_VERSION } from './levels.js';
+import { LEVELS, scrambleLevel, LEVEL_FORMAT_VERSION, isLevelLocked } from './levels.js';
 import {
   GEO_EPSILON, GEO_SAMPLE_STEP, GEO_MIN_SEGMENT_COVERAGE, GEO_MIN_SAMPLES_PER_SEG,
   centerShape, distPointToShape, sampleSegment, measureGeometricMatch,
@@ -534,6 +534,12 @@ export function initGame() {
     const lvlCheck = LEVELS[idx];
     if (lvlCheck && lvlCheck.version > LEVEL_FORMAT_VERSION) {
       console.warn(`Level ${idx} format v${lvlCheck.version} > engine v${LEVEL_FORMAT_VERSION}`);
+    }
+    if (lvlCheck && isLevelLocked(lvlCheck)) {
+      // Locked content (premium pack not owned). Bounce back to level select.
+      // Future: open a paywall / unlock prompt here.
+      setMode('levels');
+      return;
     }
     clearScene();
     undoStack = [];
@@ -1221,9 +1227,13 @@ export function initGame() {
     grid.style.backgroundSize = `20% ${100 / rowsThisPage}%`;
     for (let idx = start; idx < end; idx++) {
       const tile = document.createElement('button');
-      tile.className     = 'level-tile' + (completedLevels.has(idx) ? ' completed' : '');
+      const locked = isLevelLocked(LEVELS[idx]);
+      tile.className     = 'level-tile'
+        + (completedLevels.has(idx) ? ' completed' : '')
+        + (locked ? ' locked' : '');
       tile.type          = 'button';
       tile.dataset.level = String(idx);
+      if (locked) tile.disabled = true;
       const num = document.createElement('span');
       num.className   = 'tile-num';
       num.textContent = String(idx + 1);

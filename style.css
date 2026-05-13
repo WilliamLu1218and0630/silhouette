@@ -434,6 +434,12 @@ opacity:1;
 .level-tile.completed .tile-num{
 opacity:0.1;
 }
+.level-tile.locked{
+opacity:0.35;
+cursor:not-allowed;
+filter:grayscale(1);
+}
+.level-tile.locked .tile-thumb{opacity:0.4;}
 body.page-swapping #level-grid,
 body.page-swapping #level-grid .level-tile,
 body.page-swapping .page-arrow,

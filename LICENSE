@@ -1,0 +1,29 @@
+All rights reserved.
+
+Copyright (c) 2026 William Lu (盧威霖 / williamluaitw@gmail.com)
+
+This software and its source code, assets, level data, and accompanying
+materials (collectively, the "Work") are the proprietary and confidential
+property of the copyright holder.
+
+No part of the Work may be reproduced, distributed, modified, publicly
+displayed, publicly performed, sublicensed, sold, or otherwise exploited
+in any form or by any means, electronic or mechanical, including but not
+limited to copying, redistribution, decompilation, reverse engineering,
+or incorporation into any other product or service, without the prior
+express written permission of the copyright holder.
+
+Viewing this source code (e.g., on a public Git host or in browser
+developer tools, as is necessary for the game to run in a web browser)
+does not grant any license, ownership interest, or right of use beyond
+playing the game as intended in its officially distributed form.
+
+Third-party components used by the Work retain their respective licenses
+and copyrights (see README.md for attribution).
+
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+ARISING FROM, OUT OF, OR IN CONNECTION WITH THE WORK OR THE USE OR OTHER
+DEALINGS IN THE WORK.

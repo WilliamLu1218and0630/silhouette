@@ -3,13 +3,10 @@
   "version": "1.0.0",
   "description": "A minimalist 3D puzzle — rotate rods to match the goal silhouette.",
   "author": "William Lu",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "dev": "npx http-server . -p 8765 -c-1",
-    "gen": "node solver/cli-generate.mjs",
-    "audit": "node solver/audit-solved.mjs",
-    "verify": "node solver/test-verify.mjs"
+    "dev": "npx http-server . -p 8765 -c-1"
   },
   "engines": {
     "node": ">=18"
